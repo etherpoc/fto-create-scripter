@@ -1,0 +1,10 @@
+# FTO Strategy Lab
+#
+# src/core/ と src/backtest/ は標準ライブラリのみで動く設計のため、
+# 必須の追加依存はない。
+# 任意で以下を入れるとデータ加工や分析が楽になるが、
+# 戦略ロジック・バックテスト本体が依存してはならない。
+#
+# pandas
+# numpy
+# matplotlib

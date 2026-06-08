@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Claude Code local settings
+.claude/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# 実験データ (生成物、再現可能)
+# AI 戦略の各バージョンが書き出した判断・outcome ログ。
+# サイズが膨らみがちで再生成可能なので Git では追跡しない。
+# 必要なら個別に export して別 repo に保存する。
+data/ai_decisions/
+data/ai_v2_decisions/
+data/ai_v3_decisions/
+data/ai_v4_decisions/
+data/ai_v5_decisions/
+data/baseline_decisions/
+
+# 学習用に build_training_data.py が吐き出すファイル
+data/training.jsonl
+data/training.csv
+
+# SSL 証明書 / 秘密鍵 (mkcert やローカル生成)
+# 公開鍵は再生成手順を README に書く方針。秘密鍵は決してコミットしない。
+server/certs/*-key.pem
+server/certs/*.key
+server/certs/*.pem
+
+# ログ
+*.log
