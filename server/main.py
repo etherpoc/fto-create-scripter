@@ -39,7 +39,14 @@ from src.core.strategy_base import Bar  # noqa: E402
 #   環境変数 STRATEGY で必ず指定する。未指定なら起動時エラー。
 #   EA からの init メッセージの strategy フィールドは無視する。
 SERVER_STRATEGY = os.environ.get("STRATEGY")
-if not SERVER_STRATEGY:
+
+# ★ Record-only mode (RECORD_ONLY=1 で有効):
+#   AI / 戦略実行を完全に skip して、tick データだけ記録する。
+#   FTO は注文を受け取らないので、超高速にバックテスト (= 数年分一気に) できる。
+#   後で replay_ticks.py を使って好きな AI 設定で検証可能。
+RECORD_ONLY = os.environ.get("RECORD_ONLY") in ("1", "true", "yes", "True")
+
+if not RECORD_ONLY and not SERVER_STRATEGY:
     raise RuntimeError(
         "env STRATEGY is required (e.g. STRATEGY=zigzag_ai). "
         "Specify which strategy this server instance should run."
@@ -56,6 +63,14 @@ app = FastAPI(title="FTO Strategy Server")
 
 @app.on_event("startup")
 async def _on_startup() -> None:
+    if RECORD_ONLY:
+        log.info(
+            "RECORD_ONLY mode: strategy/AI disabled. "
+            "Recording ticks to %s, returning empty commands.",
+            os.environ.get("RECORD_TICKS_DIR", "(no RECORD_TICKS_DIR set)"),
+        )
+        return
+
     import server.deciders  # noqa: F401
     from server.deciders.registry import get_strategy_entry, list_strategies
 
@@ -177,10 +192,18 @@ async def strategy_endpoint(ws: WebSocket) -> None:
       tick       (EA→Server): {type, session_id, m15, h1?, h4?, position, balance}
       commands   (Server→EA): {type, session_id, bar_time, commands[], draw[], logs[]}
       done       (EA→Server): {type, session_id}
+
+    ★ Tick 録音 (環境変数 RECORD_TICKS_DIR 設定で有効):
+      m15/h1/h4 (position/balance は含まない) を JSONL に記録する。
+      tools/replay_ticks.py で再生すれば FTO を立ち上げずに別 AI 設定で
+      同じ期間を検証できる。
     """
     await ws.accept()
     log.info("WebSocket /ws/strategy connected: %s", ws.client)
     session: StrategySession | None = None
+    record_file = None
+    record_dir = os.environ.get("RECORD_TICKS_DIR")
+    record_seen_times: set[int] = set()
 
     try:
         while True:
@@ -197,7 +220,7 @@ async def strategy_endpoint(ws: WebSocket) -> None:
                 sid = str(msg.get("session_id") or "")
                 symbol = str(msg.get("symbol") or "UNKNOWN")
                 # ★ EA からの 'strategy' フィールドは無視。サーバ起動時の固定値を使う。
-                strategy_name = SERVER_STRATEGY
+                strategy_name = SERVER_STRATEGY or "(record_only)"
                 params = msg.get("params") or {}
                 # symbol 未確定 (UNKNOWN/空) で init を受け取った場合は拒否。
                 # EA はこれを見て、Symbol() が確定するまで待ってから再試行する。
@@ -209,20 +232,46 @@ async def strategy_endpoint(ws: WebSocket) -> None:
                         "error": "symbol not ready (got UNKNOWN); wait and retry",
                     }))
                     continue
-                try:
-                    session = StrategySession(sid, symbol, strategy_name, params)
-                except ValueError as e:
-                    await ws.send_text(json.dumps({
-                        "type": "init_ack",
-                        "session_id": sid,
-                        "ok": False,
-                        "error": str(e),
-                    }))
-                    continue
+                if not RECORD_ONLY:
+                    try:
+                        session = StrategySession(sid, symbol, strategy_name, params)
+                    except ValueError as e:
+                        await ws.send_text(json.dumps({
+                            "type": "init_ack",
+                            "session_id": sid,
+                            "ok": False,
+                            "error": str(e),
+                        }))
+                        continue
+                else:
+                    # RECORD_ONLY: ダミーセッション (session フラグだけ立てる)
+                    session = "record_only"  # type: ignore
                 log.info(
-                    "session init id=%s symbol=%s strategy=%s params_keys=%s",
-                    sid, symbol, strategy_name, list(params.keys()),
+                    "session init id=%s symbol=%s strategy=%s params_keys=%s record_only=%s",
+                    sid, symbol, strategy_name, list(params.keys()), RECORD_ONLY,
                 )
+                # ★ tick 録音ファイルを開く
+                if record_dir:
+                    try:
+                        from datetime import datetime as _dt
+                        stamp = _dt.utcnow().strftime("%Y%m%d_%H%M%S")
+                        rec_path = Path(record_dir) / symbol.upper() / f"{stamp}_{sid}.jsonl"
+                        rec_path.parent.mkdir(parents=True, exist_ok=True)
+                        record_file = open(rec_path, "w", encoding="utf-8")
+                        # メタ情報
+                        meta = {
+                            "_type": "session_meta",
+                            "session_id": sid,
+                            "symbol": symbol,
+                            "params": params,
+                            "started_at": _dt.utcnow().isoformat() + "Z",
+                        }
+                        record_file.write(json.dumps(meta, ensure_ascii=False) + "\n")
+                        record_file.flush()
+                        log.info("recording ticks to %s", rec_path)
+                    except Exception as e:  # noqa: BLE001
+                        log.warning("failed to open record file: %s", e)
+                        record_file = None
                 await ws.send_text(json.dumps({
                     "type": "init_ack",
                     "session_id": sid,
@@ -244,6 +293,36 @@ async def strategy_endpoint(ws: WebSocket) -> None:
                 h4_bar = _bar_from_dict(msg["h4"]) if msg.get("h4") else None
                 pos = msg.get("position")  # None / "long" / "short"
                 bal = float(msg.get("balance") or 0.0)
+                # ★ 録音: m15/h1/h4 だけ書く (position/balance は再生時 simulate)
+                if record_file is not None:
+                    t = int(m15_raw.get("time", 0))
+                    if t not in record_seen_times:
+                        record_seen_times.add(t)
+                        rec = {
+                            "_type": "tick",
+                            "m15": m15_raw,
+                            "h1": msg.get("h1"),
+                            "h4": msg.get("h4"),
+                        }
+                        try:
+                            record_file.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                            # flush は重いので 50 ticks ごとに
+                            if len(record_seen_times) % 50 == 0:
+                                record_file.flush()
+                        except Exception:  # noqa: BLE001
+                            pass
+                if RECORD_ONLY:
+                    # 戦略実行をスキップ。空コマンドを返すだけ。
+                    # = FTO は何の注文も受け取らず、ひたすらバーを送ってくる。超高速。
+                    await ws.send_text(json.dumps({
+                        "type": "commands",
+                        "session_id": str(msg.get("session_id") or ""),
+                        "bar_time": int(m15_raw.get("time", 0)),
+                        "commands": [],
+                        "draw": [],
+                        "logs": [],
+                    }))
+                    continue
                 # process_tick は AI 戦略の場合 Ollama への同期 HTTP 通信を含むため
                 # FastAPI の event loop を直接ブロックしないよう、スレッド実行に逃がす。
                 # これで複数 WS セッション (例: XAUUSD と EURUSD 同時 backtest) が
@@ -255,6 +334,13 @@ async def strategy_endpoint(ws: WebSocket) -> None:
 
             elif mtype == "done":
                 log.info("session done id=%s", msg.get("session_id"))
+                if record_file is not None:
+                    try:
+                        record_file.write(json.dumps({"_type": "session_done"}) + "\n")
+                        record_file.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    record_file = None
                 await ws.send_text(json.dumps({"type": "bye"}))
                 break
 
@@ -266,5 +352,8 @@ async def strategy_endpoint(ws: WebSocket) -> None:
     except WebSocketDisconnect:
         log.info("WebSocket /ws/strategy disconnected (session=%s)",
                  session.session_id if session else None)
+        if record_file is not None:
+            try: record_file.close()
+            except Exception: pass
     except Exception as e:  # noqa: BLE001
         log.exception("WS strategy error: %s", e)

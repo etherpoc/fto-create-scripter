@@ -389,6 +389,7 @@ class ZigZagLineBreakStrategy(Strategy):
                     features = build_zigzag_features(
                         self, atr_val, cur, "up",
                         recent_closes=closes, atr_line=atr_line,
+                        recent_bars=bars,
                     )
                     if not self.entry_filter("up", features):
                         ctx.log(f"[ai-filter] LONG skipped by filter at bar={self._bar_idx}")
@@ -461,6 +462,7 @@ class ZigZagLineBreakStrategy(Strategy):
                     features = build_zigzag_features(
                         self, atr_val, cur, "down",
                         recent_closes=closes, atr_line=atr_line,
+                        recent_bars=bars,
                     )
                     if not self.entry_filter("down", features):
                         ctx.log(f"[ai-filter] SHORT skipped by filter at bar={self._bar_idx}")

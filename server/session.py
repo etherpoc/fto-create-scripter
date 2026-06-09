@@ -115,6 +115,27 @@ class StrategySession:
         for k, v in (params_overrides or {}).items():
             if hasattr(params, k):
                 setattr(params, k, v)
+        # ★ アブレーション用 env オーバーライド
+        # AI_CONF_SIZE_MULT=1.0 で contrarian sizing を無効化など。
+        import os
+        env_overrides = {
+            "ai_conf_size_mult": "AI_CONF_SIZE_MULT",
+            "ai_conf_size_high": "AI_CONF_SIZE_HIGH",
+            "tp_rr": "TP_RR",
+            "block_low_liquidity": "BLOCK_LOW_LIQUIDITY",
+        }
+        for attr, env_key in env_overrides.items():
+            v = os.environ.get(env_key)
+            if v is not None and hasattr(params, attr):
+                cur = getattr(params, attr)
+                try:
+                    if isinstance(cur, bool):
+                        new = v.lower() in ("1", "true", "yes", "on")
+                    else:
+                        new = type(cur)(v)
+                    setattr(params, attr, new)
+                except (TypeError, ValueError):
+                    pass
         self.strategy = StrategyCls(params)
 
         # ログファイルパスを銘柄ごとに解決して、session_start レコードを書き出す。

@@ -55,6 +55,17 @@ Key fields:
 - `tokyo_open` / `london_open` / `ny_open` : session booleans.
 - `is_overlap`           : London+NY overlap (peak liquidity).
 - `is_quiet`             : no major session open (low liquidity, noise risk).
+- `double_top_m15` / `double_bottom_m15` : two recent Z1 pivots at very similar
+                            prices on M15. A real double top is a strong reversal
+                            signal — be wary of buying into one.
+- `double_top_h4` / `double_bottom_h4`    : same on H4 (much stronger).
+- `touches_above_h4` / `touches_below_h4` : how many recent pivots tapped the
+                            nearest H4 wall (above/below). 3+ = strong S/R level.
+- `bars_since_20bar_high` / `bars_since_20bar_low` : freshness of recent extremes.
+                            0 = just made a new extreme. Larger = stale.
+- `recent_5_ohlc`        : last 5 M15 bars as {o,h,l,c}_atr (price diffs / ATR).
+                            Read the SHAPE: long upper wicks, engulfings, dojis,
+                            momentum bars. This is your visual of the chart.
 
 Decide whether to ENTER the trade or SKIP it. The rule-based layer has already
 validated the basic setup (reversal + line trigger), so you are filtering edge
@@ -124,6 +135,32 @@ Be concise. JSON only. No reasoning text outside the JSON.
 """
 
 
+# ★ v7 で実験的に導入したペア別ガイダンスは、replay アブレーション (2026-06-09)
+# の結果「逆効果」だったので空に戻す。
+# 詳細: USDJPY WR が 8% → 29% に改善、XAUUSD WR が 43% → 50% に改善。
+# AI を過度に保守的にし「BoJ 介入リスク」「oil 相関」を過剰警戒させていた。
+# LLM の事前知識に任せた方が良いと判明。再追加する際は事前にアブレーション必須。
+# (旧版は git history 参照)
+SYMBOL_GUIDANCE: dict[str, str] = {}
+
+
+def _user_content_for(features: dict) -> str:
+    """LLM への user メッセージを組み立てる。symbol 別ガイドラインを前置きする。
+
+    env DISABLE_PER_SYMBOL_GUIDANCE=1 で guidance を抑制 (アブレーション用)。
+    """
+    import os
+    symbol = str(features.get("symbol") or "").upper()
+    if os.environ.get("DISABLE_PER_SYMBOL_GUIDANCE"):
+        guidance = ""
+    else:
+        guidance = SYMBOL_GUIDANCE.get(symbol, "")
+    prefix = ""
+    if guidance:
+        prefix = f"Symbol guidance for {symbol}:\n{guidance}\n\n"
+    return prefix + "Features:\n" + json.dumps(features, ensure_ascii=False)
+
+
 @dataclass
 class OllamaAIModel:
     """Ollama 経由でローカル LLM に問い合わせる AIModel 実装。"""
@@ -183,14 +220,20 @@ class OllamaAIModel:
         payload = {
             "model": self.model,
             "stream": False,
-            "options": {"temperature": self.temperature},
+            "options": {
+                "temperature": self.temperature,
+                # gemma4:e4b 等の thinking モデル対応:
+                # default の num_predict が小さいと thinking で打ち切られ、JSON
+                # 出力前に done_reason="length" で終わってしまうので余裕を持たせる。
+                "num_predict": 4096,
+            },
+            # thinking モデルでも JSON を出させるため、thinking を抑制する。
+            # Ollama 0.3+ で対応。古いバージョンでは無視されるだけで害なし。
+            "think": False,
             "format": "json",  # Ollama に JSON Mode を要求
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": "Features:\n" + json.dumps(features, ensure_ascii=False),
-                },
+                {"role": "user", "content": _user_content_for(features)},
             ],
         }
         with httpx.Client(timeout=self.timeout_seconds) as client:

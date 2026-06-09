@@ -37,6 +37,8 @@
 | v3 | TF 不一致を SKIP 要因に復活 | `data/ai_v3_decisions/` | 68.2% | 40.5% | 42 oc | -43.25 |
 | v4 | + RSI / ATR ratio / セッション / conf 閾値 0.7 | `data/ai_v4_decisions/` | 50.3% | 42.5% | 80 oc | +92.91 |
 | **v5** | + 時間帯フィルタ + conf サイジング + trailing + tp_rr 1.5 | `data/ai_v5_decisions/` | **50.0%** | **43.2%** ✨ | **118 oc** | **+170.46** ✨ |
+| v6 | + contrarian sizing (conf>=0.85 で lot ×0.5) | 未収集 | - | - | - | - |
+| v7 | + チャートパターン features + per-symbol guidance + recent_5_ohlc | `data/ai_v7_decisions/` | 62.5% | **36.3%** ⚠️ | 91 oc | +36.48 |
 
 ### 各段階で得られた知見
 
@@ -120,6 +122,139 @@ conf >= 0.85 ( 9件): WR 22.2%  sum_pnl  -0.75  avg -0.08/件
 - 全 +170.46 のうち conf<0.85 群 = +171.21 (= 主力)
 - 高 conf 群の 1.5x boost は実質ノイズ程度の害
 - = TP closer (1.5R) + trailing が v5 改善の主因と推定
+
+#### v7 (改悪、ablation で原因特定)
+変更内容:
+- think:False (gemma4:e4b の thinking model 対応、JSON 空応答回避)
+- チャートパターン features 追加 (double_top, recent_5_ohlc, touches_*)
+- ペア別 SYMBOL_GUIDANCE 追加 (USDJPY/USDCAD/XAUUSD/EURUSD/GBPUSD)
+- contrarian sizing (conf>=0.85 で lot ×0.5)
+
+結果: WR 43.2% (v5) → **36.3% (v7) で大幅悪化**、PnL +170 → +36
+
+ablation 結果 (replay で env 切り替えて検証、 XAUUSD/USDJPY 2 ペアで):
+
+| variant | XAUUSD WR | USDJPY WR |
+|---|---|---|
+| v7 (full) | 43% | 8% |
+| v7a (DISABLE_PER_SYMBOL_GUIDANCE) | **50%** | **29%** ✨ |
+| v7b (AI_CONF_SIZE_MULT=1.0) | 40% | 8% (同じ) |
+| v7c (DISABLE_V7_FEATURES) | 56% | 9% |
+
+**結論**:
+- **per-symbol guidance が主犯** (両ペアで悪化)。「BoJ 介入リスク」「oil 相関」
+  などの prompt が AI を過度に保守化、エントリ機会を潰していた。
+  → コードから `SYMBOL_GUIDANCE` を空に戻した
+- v7 features は XAUUSD には軽く逆効果 (43% → 56% で改善)、USDJPY 無影響
+  → 保留 (env DISABLE_V7_FEATURES=1 で OFF にできるよう env switch を維持)
+- contrarian sizing は意思決定に影響なし (lot だけ変わる)
+
+**学び**:
+- LLM に「特化ガイド」を書くと過度に偏った判断に誘導しがち
+- LLM の事前知識 (symbol 名から推測) に任せた方が良い場合あり
+- ablation には replay 必須。FTO で都度回すと時間掛かりすぎる
+
+---
+
+## 5.5 年データセット (2021-01 ~ 2026-06) (2026-06-09 構築)
+
+過去 5.5 年 × 12 ペア (= 4 主要 USD + 4 USDxxx + 4 JPY クロス) の M15/H1/H4 を
+record_only モードで FTO から収集。約 160 万 ticks、737 MB。
+
+これ以降のすべての検証はこの「固定データセット」に対する replay で行う:
+- FTO は不要 (5 分で再起動・ロジック変更可能)
+- 全 variant が**同じ市場データ**を見るのでフェア比較が成立
+- サンプル数: 1 ペア 80-200 outcomes、12 ペア合計 1000-2200 outcomes
+
+### Baseline (always-enter、AI 無効) 結果
+
+| 指標 | 値 |
+|---|---|
+| 期間 | 2021-01 ~ 2026-06 (66 ヶ月) |
+| Trades | 2208 |
+| WR | 35.4% |
+| Avg R/trade | -0.005 |
+| Sum R | -11.96 |
+| 月利 (単利) | -0.18% |
+| 月利 (複利) | -0.29% |
+| 合計リターン | -17.3% |
+
+**戦略本体のみでは赤字**。ペア別では JPY クロス + XAUUSD が +EV、USD クロスは
+ほぼ全部 −EV。USDCAD/AUDUSD で −18 / −30 R と大きく失う。
+
+### v7d/gemma4 (DISABLE_PER_SYMBOL_GUIDANCE + DISABLE_V7_FEATURES) 結果
+
+| 指標 | 値 | vs Baseline |
+|---|---|---|
+| Trades | 1373 | -38% (フィルタ動作) |
+| WR | 35.3% | ほぼ同等 |
+| Sum R | +0.74 | **+12.7 R 改善** |
+| 月利 (単利) | +0.01% | +0.19pp |
+| 月利 (複利) | -0.07% | +0.22pp |
+| 合計リターン | -4.7% | +12.6pp |
+
+**AI フィルタは確かに損失を圧縮**。ただし break-even 付近で、月利 6-8% には程遠い。
+ペア別では USDCAD (-18 → -7)、NZDUSD (-7 → -2.8) が顕著改善。EURUSD だけ
+悪化 (-1.9 → -6.2)。XAUUSD/AUDJPY/EURJPY のような元々 +EV ペアでは AI フィルタの
+追加価値は小さい。
+
+### qwen2.5:7b (v7d 同設定、モデルだけ切替) 結果
+
+| 指標 | 値 | vs gemma4 |
+|---|---|---|
+| Trades | 1723 | +25% (skip 少なめ) |
+| WR | 35.0% | -0.3pp |
+| Sum R | -12.01 | **-12.8 R 悪化** |
+| 月利 (単利) | -0.18% | -0.19pp |
+| 合計リターン | -16.4% | -11.7pp |
+
+**qwen2.5:7b は baseline と同等レベルで gemma4:e4b より明確に劣る**。「大きい
+モデル = 良い判断」は成立しなかった。USDJPY (+1.7 → +7.3)、GBPUSD (-0.3 → +4.5) で
+qwen が勝つペアあり、USDCAD (-6.9 → -22) では qwen が大幅悪化。**ペアごとに
+得意なモデルが違う** が、Uniform で見ると gemma4 が安定して最良。
+
+### 3 variant 横並びまとめ (Uniform = 全 12 ペア同 variant)
+
+| Variant | Trades | WR | Sum R | 月利 単利 | 累積 (66ヶ月) |
+|---|---|---|---|---|---|
+| baseline | 2208 | 35.4% | -11.96 | -0.18% | **-11.3%** |
+| **v7d_gemma4** | **1373** | **35.3%** | **+0.74** | **+0.01%** | **+0.7%** ← Uniform best |
+| qwen25_7b | 1723 | 35.0% | -12.01 | -0.18% | -11.3% |
+
+### 架空 portfolio (IN-SAMPLE、参考値)
+
+| Portfolio | Sum R | 月利 単利 | 累積 |
+|---|---|---|---|
+| Best-per-pair (各ペア best 選択) | +33.8 | +0.51% | +40.1% |
+| Positive-pair-only (8 ペアのみ) | +66.1 | +1.00% | **+93.0%** |
+
+**⚠️ 上記 2 つは backtest 結果から後付けで最適化したもので overfitting risk あり**。
+実運用では下振れすると見るのが妥当。
+
+### ゴール「月利 6-8%」との距離
+
+```
+理論最高 (Positive-only, in-sample): +1.00%/月  →  ゴールの 1/6 〜 1/8
+v7d_gemma4 Uniform 実力:             +0.01%/月  →  ほぼ break-even
+```
+
+**現在のロジック (M15 ZigZag + AI フィルタ) の延長線では月利 6-8% は構造的に
+届かない**水準。out-of-sample で目減りを考慮すると、現実的な天井は **月利 0.3-0.5%
+(年率 4-6%) ほど**。FX 個人運用としては悪くないが、ゴールとは 1 桁違う。
+
+### 何が必要か (= NEXT_TASKS の P0 候補)
+
+1. **M5 タイムフレーム** (= トレード数 3x) → 月利 ~3% の可能性
+2. **Fine-tuning** (5.5 年 × 2000+ outcomes をデータセット化、戦略専用モデル訓練)
+3. **戦略本体の見直し** (ZigZag 単体ではなく、複合戦略やトレンドフォロー追加)
+4. **レバレッジ増** (リスク 1% → 2-3% で線形改善、ただし DD も 2-3 倍)
+5. **out-of-sample 検証** (= 2016-2020 の 5 年で同検証 → in-sample bias を測る)
+
+**学び**:
+- AI モデルの優劣は「ペアによって違う」 (universal best はない)
+- 「大きいモデルが偉い」は技術分析タスクでは成立しない (qwen 7B > gemma 4B ではなかった)
+- 戦略本体のシグナル品質 (Baseline) が天井を決める。AI は「悪い負けを減らす」だけ
+- ペア選択 (loss pair を除外する) は AI フィルタより効果大。ただし overfitting 注意
 
 ---
 

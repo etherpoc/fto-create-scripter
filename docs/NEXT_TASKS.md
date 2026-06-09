@@ -29,6 +29,70 @@
 - [ ] サンプル 50+ 集まったら v5 と比較
 - [ ] 仮説: 「中信頼度の判断こそが AI の真の優位性」を再確認
 
+---
+
+## 🔴 P0 (2026-06-10 5.5 年検証後の優先度更新)
+
+### ゴール: 月利 6-8% 達成
+5.5 年データで判明したのは「現ロジック延長線では月利 0.3-1% が天井」。
+ゴールに届くには根本的な改善が必要。
+
+### A. M5 timeframe 化 (期待度: 高、リスク: 中)
+- [ ] M5 で record_only モードで 5.5 年データ収集 (今の M15 と並列で良い)
+- [ ] ZigZag params を M5 スケールに調整 (z1_depth, atr_period)
+- [ ] M5 + v7d/gemma4 設定で replay
+- [ ] 期待: トレード数 3x で月利 ~3% になるか確認
+- [ ] 失敗パターン: ノイズ増で WR が 30% 切ったら却下
+
+### B. Fine-tuning 準備 (期待度: 中、ROI: 不明)
+- [ ] 5.5 年データの全 outcomes を JSONL 化 (= `tools/build_training_data.py`)
+- [ ] decision × outcome を join、prompt/completion ペア形式に
+- [ ] LoRA 用に量子化前のベースモデル (gemma3:4b or gemma4:e4b) を取得
+- [ ] Ollama では fine-tune できないので、unsloth or LLaMA-Factory で学習
+- [ ] 学習後モデルを Ollama に import (`ollama create`)
+- [ ] v8 として replay で評価
+
+### C. 別期間 (2016-2020) で out-of-sample 検証 (= overfitting bias 測定)
+- [ ] FTO で 2016-01 〜 2020-12 を record_only で収集
+- [ ] data/recorded_ticks_oos に保存
+- [ ] v7d/gemma4 (本検証で best) で replay
+- [ ] in-sample (2021-26) vs out-of-sample (2016-20) で月利を比較
+- [ ] 差が大きければ overfitting、小さければ robust
+- [ ] **これをやらないと「月利 X% 達成」と主張できない**
+
+### D. 戦略本体の見直し (期待度: 不明、規模: 大)
+- ZigZag 単体ではなく、別ロジック追加: ブレイクアウト、レンジ反発、トレンドフォロー
+- 複数 sub-strategy のアンサンブル
+- 現在 1% リスク → トレードあたりの期待値構造を変える
+
+### E. レバレッジ増 (期待度: 線形、リスク: 線形)
+- リスク 1% → 2% (or 3%) で月利が線形に倍増
+- ただし最大 DD も比例増。月利 6% 目標達成のため一時的に 2% に上げる検討
+- スイッチは `risk_pct` パラメータ 1 つ
+
+---
+
+## 5.5 年検証で得られた学び (重要)
+
+1. **「大きいモデル = 良い」は技術分析タスクでは不成立**
+   - qwen2.5:7b (7B) は gemma4:e4b (4B 相当) より明確に劣る pair が多数
+   - モデルサイズより prompt 設計と feature 表現の方が重要
+
+2. **AI フィルタの効果は限定的 (+12 R / 5.5 年 = 月利 +0.2%)**
+   - 「悪い負けを減らす」が主な貢献
+   - 「勝ちトレードを増やす」効果は薄い
+   - ゴール 月利 6-8% に届くためには別の lever が必要
+
+3. **戦略本体のシグナル品質 (Baseline R) が天井を決める**
+   - JPY クロス / XAUUSD = +EV、USD クロス = ほぼ -EV
+   - AI は USD クロスを -EV → ±0 にする程度
+   - 大きく稼ぐためにはシグナル自体の改善が必要
+
+4. **in-sample 最適化に注意**
+   - 「best variant per pair」は backtest 結果からの後付け選択
+   - out-of-sample で同パフォーマンス保証されない
+   - 必ず別期間で検証してから運用判断する
+
 ### 確認用コマンド
 ```bash
 python tools/compare_baseline.py --ai data/ai_v5_decisions --baseline data/baseline_decisions
