@@ -46,11 +46,14 @@ class Params(StrategyParams):
     # ★ v5: 時間帯フィルタ (UTC ベース)
     # True で月曜オープン早朝 / 金曜クローズ後 / 土日を skip
     block_low_liquidity: bool = True
-    # ★ v5: AI confidence 連動の position size
+    # ★ v5/v6: AI confidence 連動の position size
     # AI conf >= ai_conf_size_high のとき lot を ai_conf_size_mult 倍にする
-    # (= 高確信時はリスク 1.5%。risk_pct と組み合わせて使用)
+    # 当初 v5 では mult=1.5 (高確信時に攻める) で実装したが、データを見ると
+    # 高 conf 群の WR が 22% (vs 中 conf 群 45%) と「逆相関」していた。
+    # 「分かりやすい setup ほど狩られる」現象。v6 では mult=0.5 にして
+    # 高 conf 時こそ薄く張る contrarian sizing にした。
     ai_conf_size_high: float = 0.85
-    ai_conf_size_mult: float = 1.5
+    ai_conf_size_mult: float = 0.5
     # ★ v5: EA 側 trailing close (SL Modify が使えない FTO 制約への代替)
     # トレード保有中、含み益が +trail_activate_R 達成後、含み益が trail_stop_R
     # まで戻ったら EA 側で CloseOrder する (= BE 保護)

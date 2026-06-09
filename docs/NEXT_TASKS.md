@@ -20,6 +20,15 @@
 - [ ] conf サイジングだけ ON → 効果計測
 - [ ] 目的: v6 で「効くものだけ残す」判断材料を得る
 
+### v6: AI conf x WR 逆相関を受けた contrarian sizing 検証
+- v5 集計で「conf >= 0.85 群 WR 22% (vs conf < 0.85 群 WR 45%)」が判明
+- 高信頼度判断ほど負ける = overconfidence bias
+- 対応: `ai_conf_size_mult: 1.5 → 0.5` で逆方向のサイジングに
+- [ ] v6 = v5 + ai_conf_size_mult=0.5 でバックテスト (data/ai_v6_decisions/)
+- [ ] 期待: 高 conf 群の損失が半減、全体 PnL +5-10 程度改善
+- [ ] サンプル 50+ 集まったら v5 と比較
+- [ ] 仮説: 「中信頼度の判断こそが AI の真の優位性」を再確認
+
 ### 確認用コマンド
 ```bash
 python tools/compare_baseline.py --ai data/ai_v5_decisions --baseline data/baseline_decisions
