@@ -5,14 +5,20 @@
 
 ---
 
-## 🔴 P0 — 直近 (今動かしてる検証)
+## 🔴 P0 — 直近
 
-### v5 の効果検証
-- [ ] 8 ペア並列で 3 か月相当バックテスト
-- [ ] 100+ outcomes 集まったら `python tools/compare_baseline.py --ai data/ai_v5_decisions --baseline data/baseline_decisions`
-- [ ] v4 と v5 の比較もする (`--baseline data/ai_v4_decisions`)
-- [ ] 期待: WR +5pp、PnL +20%、ドローダウン改善
-- [ ] 想定外の悪化があれば原因切り分け (tp_rr 1.5 / 時間帯フィルタ / conf サイズ / trailing のどれが効いた / 効かなかった)
+### v5 の効果検証 (完了 ☑)
+- [x] 8 ペア並列で 6 か月相当バックテスト (118 outcomes)
+- [x] 結果: WR 43.2% (+9.2pp vs BL)、PnL +170.46 (v4 の約 2 倍)
+- [x] XAUUSD が大きく改善 (WR 47% → 61%、pnl +93 → +176)
+- [x] PROGRESS.md 更新済み
+
+### v5 の寄与アブレーション (どの変更が一番効いたか)
+- [ ] tp_rr 1.5 だけにして他 OFF → 効果計測
+- [ ] trailing だけにして他 OFF → 効果計測
+- [ ] 時間帯フィルタだけ ON → 効果計測
+- [ ] conf サイジングだけ ON → 効果計測
+- [ ] 目的: v6 で「効くものだけ残す」判断材料を得る
 
 ### 確認用コマンド
 ```bash

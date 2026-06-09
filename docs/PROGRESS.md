@@ -35,8 +35,8 @@
 | Baseline | AlwaysEnter (AI 無効化) | `data/baseline_decisions/` | 100% | 34.0% | 97 oc | -72.73 |
 | v2 | プロンプト緩和 (= ほぼ baseline) | `data/ai_v2_decisions/` | 93% | 37.3% | 75 oc | -65.74 |
 | v3 | TF 不一致を SKIP 要因に復活 | `data/ai_v3_decisions/` | 68.2% | 40.5% | 42 oc | -43.25 |
-| **v4** | + RSI / ATR ratio / セッション / conf 閾値 0.7 | `data/ai_v4_decisions/` | **49.7%** | **42.3%** ✨ | 78 oc | **+91.44** |
-| v5 (進行中) | + 時間帯フィルタ + conf サイジング + trailing + tp_rr 1.5 | `data/ai_v5_decisions/` | TBD | TBD | TBD | TBD |
+| v4 | + RSI / ATR ratio / セッション / conf 閾値 0.7 | `data/ai_v4_decisions/` | 50.3% | 42.5% | 80 oc | +92.91 |
+| **v5** | + 時間帯フィルタ + conf サイジング + trailing + tp_rr 1.5 | `data/ai_v5_decisions/` | **50.0%** | **43.2%** ✨ | **118 oc** | **+170.46** ✨ |
 
 ### 各段階で得られた知見
 
@@ -78,12 +78,30 @@
   - 時間帯 / セッション情報は AI が活用してくれる
   - USDCAD は AI/baseline どちらも弱い (戦略自体の限界)
 
-#### v5 (進行中、まだ収集途中)
+#### v5 (6 か月相当バックテスト完了、現状ベスト)
+変更内容:
 - TP 近め: `tp_rr 2.0 → 1.5` (WR up を狙う)
 - 時間帯ハードフィルタ (Mon < 7 UTC / Fri ≥ 18 UTC / 土日 を Python 側で SKIP)
 - AI conf >= 0.85 のとき lot ×1.5 (高確信時は積極)
 - EA 側 trailing close (含み益 +1R 到達後 0R に戻ったら CloseOrder = 疑似 BE 保護)
   - FTO API に SL Modify / Partial Close が無いための代替実装
+
+結果:
+- WR 43.2% (+9.2pp vs Baseline、+0.7pp vs v4)
+- sum_pnl **+170.46** (v4 の +93 から **約 2 倍**)
+- outcomes 118 (これまでで最大、信頼性向上)
+- ペア別:
+  - **XAUUSD WR 47% → 61%** (pnl +93 → +176) — TP closer + trailing が金で効いた可能性高い
+  - USDCHF / EURUSD / NZDUSD で改善維持
+  - USDJPY / USDCAD は依然弱い (戦略本体の限界か)
+
+**学び**:
+- TP を近づけて WR を上げる戦略は ZigZag 戦略と相性が良い (ライン抜けの初動を取れる)
+- Trailing は急変動するペア (XAUUSD) で効果大、小ボラペアでは影響薄
+- 時間帯フィルタは件数を大きく変えなかった (= AI 単体でもある程度時間帯判断できていた)
+- conf サイジングの寄与は単独では切り分け困難。アブレーションは next task
+
+ユーザー実測: v4 6 か月 6% → v5 はおおよそ 11% 相当 (年率 22% 程度) の見込み
 
 ---
 
@@ -116,12 +134,12 @@
 
 ---
 
-## 現在の数値感 (v4)
+## 現在の数値感 (v5)
 
-3 か月相当バックテスト、リスク 1%/トレード、min_rr 1.0:
-- 全体: WR 42.3% / sum_pnl +91.44 (price 単位)
-- ユーザー実測: **6 か月で 6% 利益** (年率 12% 相当)
-- 改善余地として v5 を仕込み中
+6 か月相当バックテスト、リスク 1%/トレード、tp_rr 1.5、trailing 有効:
+- 全体: WR **43.2%** / sum_pnl **+170.46** (price 単位)
+- ユーザー実測: **6 か月で約 11% 利益** (年率 22% 程度) と推定
+- XAUUSD が圧倒的稼ぎ頭 (WR 61% / pnl +176)、USDJPY と USDCAD は依然弱い
 
 ---
 
