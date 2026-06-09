@@ -24,11 +24,12 @@ Thumbs.db
 # サイズが膨らみがちで再生成可能なので Git では追跡しない。
 # 必要なら個別に export して別 repo に保存する。
 data/ai_decisions/
-data/ai_v2_decisions/
-data/ai_v3_decisions/
-data/ai_v4_decisions/
-data/ai_v5_decisions/
+data/ai_*_decisions/
 data/baseline_decisions/
+data/ablation/
+data/recorded_ticks/
+data/recorded_ticks_5y/
+data/eval_5y/
 
 # 学習用に build_training_data.py が吐き出すファイル
 data/training.jsonl
