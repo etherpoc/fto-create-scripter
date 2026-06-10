@@ -123,6 +123,10 @@ class StrategySession:
             "ai_conf_size_high": "AI_CONF_SIZE_HIGH",
             "tp_rr": "TP_RR",
             "block_low_liquidity": "BLOCK_LOW_LIQUIDITY",
+            # v8: 押し目戻し比率と MTF alignment
+            "pullback_ratio": "PULLBACK_RATIO",
+            "require_mtf_alignment": "REQUIRE_MTF_ALIGNMENT",
+            "sl_buffer_k": "SL_BUFFER_K",
         }
         for attr, env_key in env_overrides.items():
             v = os.environ.get(env_key)

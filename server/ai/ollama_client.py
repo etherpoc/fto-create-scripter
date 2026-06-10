@@ -66,6 +66,18 @@ Key fields:
 - `recent_5_ohlc`        : last 5 M15 bars as {o,h,l,c}_atr (price diffs / ATR).
                             Read the SHAPE: long upper wicks, engulfings, dojis,
                             momentum bars. This is your visual of the chart.
+- `h1_trendline_dist_atr` / `h4_trendline_dist_atr` : signed distance from current
+                            price to the H1/H4 trend line (drawn through last 2
+                            lows in up-trend or 2 highs in down-trend), in ATR.
+                            Near 0 = on the trend line (key support/resistance).
+                            For up-trend: positive = above line (healthy),
+                            ~0 = at line (bounce zone), negative = broken below.
+                            For down-trend: opposite.
+- `h1_channel_dist_atr` / `h4_channel_dist_atr` : signed distance from current
+                            price to the H1/H4 channel line (parallel to trend
+                            line, passing through opposite extreme in between).
+                            Near 0 = at channel edge (reversal risk).
+                            Use trend+channel together to judge entry quality.
 
 Decide whether to ENTER the trade or SKIP it. The rule-based layer has already
 validated the basic setup (reversal + line trigger), so you are filtering edge

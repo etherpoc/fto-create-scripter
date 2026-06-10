@@ -124,6 +124,62 @@ def _level_touches(pivots: list, target_price: Optional[float], atr_val: float, 
     return cnt
 
 
+def _compute_trendline_channel(pivots: list, current_idx: int, current_price: float,
+                                atr_val: float, trend: Optional[str]
+                                ) -> tuple[Optional[float], Optional[float]]:
+    """直近 2 つの同方向ピボットで引いたトレンドライン + チャネルラインまでの距離 (ATR 単位)。
+
+    Trend "up":
+      - 直近 2 つの安値 L1, L2 を結ぶ = 上昇トレンドライン
+      - L1〜L2 間の最高値を通る平行線 = チャネル上限ライン
+      - 戻り値: (現在価格 - トレンドラインの現在値) / ATR, (現在価格 - チャネルラインの現在値) / ATR
+      - 符号: 上 = positive, 下 = negative
+
+    Trend "down":
+      - 直近 2 つの高値 H1, H2 を結ぶ = 下降トレンドライン
+      - H1〜H2 間の最安値を通る平行線 = チャネル下限ライン
+
+    trend が None / 同方向ピボット 2 つ未満 / 間にチャネル基点なし → 該当値は None。
+    """
+    if trend not in ("up", "down"):
+        return (None, None)
+
+    lows = [p for p in pivots if p.kind == "low"]
+    highs = [p for p in pivots if p.kind == "high"]
+
+    if trend == "up":
+        if len(lows) < 2: return (None, None)
+        P1, P2 = lows[-2], lows[-1]
+        opposite = highs
+    else:  # down
+        if len(highs) < 2: return (None, None)
+        P1, P2 = highs[-2], highs[-1]
+        opposite = lows
+
+    if P2.index <= P1.index:
+        return (None, None)
+    slope = (P2.price - P1.price) / (P2.index - P1.index)
+    # トレンドラインの現在 index における値
+    trendline_at_now = P2.price + slope * (current_idx - P2.index)
+    trendline_dist_atr = (current_price - trendline_at_now) / atr_val
+
+    # チャネル: P1 と P2 の間にある反対側ピボットから最も離れたもの
+    in_range = [p for p in opposite if P1.index < p.index < P2.index]
+    if not in_range:
+        return (trendline_dist_atr, None)
+    if trend == "up":
+        # チャネル基点 = 最高値
+        C = max(in_range, key=lambda p: p.price)
+    else:
+        # チャネル基点 = 最安値
+        C = min(in_range, key=lambda p: p.price)
+    trendline_at_C = P1.price + slope * (C.index - P1.index)
+    offset = C.price - trendline_at_C   # 平行線のオフセット
+    channel_at_now = trendline_at_now + offset
+    channel_dist_atr = (current_price - channel_at_now) / atr_val
+    return (trendline_dist_atr, channel_dist_atr)
+
+
 def build_zigzag_features(
     strategy: Any,
     atr_val: float,
@@ -253,6 +309,27 @@ def build_zigzag_features(
     double_top_h4 = _detect_double_top(list(strategy.z1_h4.pivots), atr_val)
     double_bottom_h4 = _detect_double_bottom(list(strategy.z1_h4.pivots), atr_val)
 
+    # ★ v9: H1/H4 のトレンドライン + チャネルライン距離
+    # 直近 2 つの同方向 (up trend = 2 lows / down trend = 2 highs) を結んだトレンドライン、
+    # その間にある反対側極値を通る平行線 = チャネルライン。
+    # 現在価格との距離を ATR 正規化した signed 値を AI feature として渡す。
+    # > 0 = 現在価格がライン上、< 0 = 下。
+    # ライン上なら trend follow 入りやすい、チャネル端なら反転リスク等を AI が読む。
+    try:
+        h1_now_idx = len(strategy.z1_h1.bars) - 1
+        h1_trendline_dist_atr, h1_channel_dist_atr = _compute_trendline_channel(
+            list(strategy.z1_h1.pivots), h1_now_idx, price, atr_val, h1_trend,
+        )
+    except Exception:  # noqa: BLE001
+        h1_trendline_dist_atr, h1_channel_dist_atr = None, None
+    try:
+        h4_now_idx = len(strategy.z1_h4.bars) - 1
+        h4_trendline_dist_atr, h4_channel_dist_atr = _compute_trendline_channel(
+            list(strategy.z1_h4.pivots), h4_now_idx, price, atr_val, h4_trend,
+        )
+    except Exception:  # noqa: BLE001
+        h4_trendline_dist_atr, h4_channel_dist_atr = None, None
+
     # 近接 H4 wall への touches (= S/R の強度)
     h4_walls_all = [p.price for p in strategy.z1_h4.pivots]
     nearest_above_h4_raw = min((w for w in h4_walls_all if w > price), default=None)
@@ -360,6 +437,12 @@ def build_zigzag_features(
         "bars_since_20bar_high": bars_since_20bar_high,
         "bars_since_20bar_low": bars_since_20bar_low,
         "recent_5_ohlc": recent_5_ohlc,
+        # ★ v9: トレンドライン / チャネルライン距離 (ATR 正規化、signed)
+        # > 0 = 現在価格がライン上、< 0 = 下、None = ライン引けず
+        "h1_trendline_dist_atr": h1_trendline_dist_atr,
+        "h1_channel_dist_atr": h1_channel_dist_atr,
+        "h4_trendline_dist_atr": h4_trendline_dist_atr,
+        "h4_channel_dist_atr": h4_channel_dist_atr,
         # 後で outcome と join するための時刻と価格 (生値) — LLM には渡らない
         "bar_time": int(cur_bar.time),
         "price": float(price),

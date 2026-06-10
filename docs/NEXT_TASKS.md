@@ -24,10 +24,52 @@
 - v5 集計で「conf >= 0.85 群 WR 22% (vs conf < 0.85 群 WR 45%)」が判明
 - 高信頼度判断ほど負ける = overconfidence bias
 - 対応: `ai_conf_size_mult: 1.5 → 0.5` で逆方向のサイジングに
-- [ ] v6 = v5 + ai_conf_size_mult=0.5 でバックテスト (data/ai_v6_decisions/)
-- [ ] 期待: 高 conf 群の損失が半減、全体 PnL +5-10 程度改善
-- [ ] サンプル 50+ 集まったら v5 と比較
-- [ ] 仮説: 「中信頼度の判断こそが AI の真の優位性」を再確認
+- [x] v6 = v5 + ai_conf_size_mult=0.5 でバックテスト (data/ai_v6_decisions/)
+- [x] 結果: WR は変わらず (sizing は意思決定に影響なし)
+
+---
+
+## 🔴 P0 (2026-06-10 更新)
+
+### M5 + ハイブリッド portfolio の精緻化
+v8_38 + M5 検証で「USD系は M5、JPY 系は M15 が良い」と判明。
+- [ ] M5 + gemma4 12 ペア完走 (実行中)
+- [ ] 完了次第、ハイブリッド (M5 一部 + M15 一部) の精密な portfolio 計算
+- [ ] 仮想ハイブリッドで月利 1-2% / 月の出口検討
+
+### Out-of-sample 検証 (2016-2020) ← 最重要
+v8_38 や M5 ハイブリッドの「真の robustness」を測定。
+- [ ] FTO で 2016-01 〜 2020-12 を record_only で M15 + M5 録音 (5 年分)
+  - 想定: M15 録音 6h、M5 録音 12h
+- [ ] data/recorded_ticks_oos_m15 / m5 に保存
+- [ ] v8_38, m5_38, ハイブリッド全部 replay → in-sample との差分計測
+- [ ] 月利が +0.2% 以上維持できれば実運用候補
+
+### ZigZag M5 パラメータスケーリング
+M5 で z1_depth=25 は 2.08h で短すぎる。z1_depth=75 (= M15 と同じ 6.25h コンテキスト) で再検証。
+- [ ] env で z1_depth 等を override 可能化 (現在は固定)
+- [ ] m5_38_scaled (z1_depth=75, atr_period=42, lookback=150) で replay
+- [ ] M5 + scale が JPY クロスの悪化を救えるか確認
+
+---
+
+## 🟡 P1
+
+### 月利 6-8% への構造的アプローチ (1% リスク制約下)
+現アーキテクチャの天井は月利 ~1%。ゴール到達には根本変更必要:
+
+- [ ] 戦略本体の追加: ブレイクアウトロジックの併用 (押し目と排他ではなく重ね合わせ)
+- [ ] M1 timeframe 検討 (件数 5x 想定、ノイズリスク大)
+- [ ] 別ロジックの実装: トレンドフォロー + レンジ反発のマルチ戦略
+- [ ] Fine-tuning: 5.5 年データの全 features → outcome で LoRA 学習
+  - データ: 8000+ outcomes 利用可能
+  - 想定効果: 不明、要実験
+
+### Pip サイズ / spread コスト の現実反映
+現状の R 計算は spread を考慮していない。
+- [ ] outcome 記録時に spread を引いた pnl を別途保持
+- [ ] 主要ペアの実 spread (M5/M15 平均) を調査
+- [ ] spread-adjusted R で再評価
 
 ---
 

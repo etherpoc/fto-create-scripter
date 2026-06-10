@@ -60,6 +60,14 @@ class Params(StrategyParams):
     trail_enabled: bool = True
     trail_activate_R: float = 1.0
     trail_stop_R: float = 0.0
+    # ★ v8: H1/H4 trend がエントリー方向と一致しているときのみ参加
+    # 不一致 (= 上位足が逆向き or null) ならスキップ
+    require_mtf_alignment: bool = True
+    # ★ v8: 押し目エントリー
+    # 転換 armed 後、転換後の極値 (extreme) から
+    # anchor (= 転換前の反対側ピボット) 方向に `pullback_ratio` 戻したら
+    # 押し目到達としてエントリー。0.5 = 半値戻し。
+    pullback_ratio: float = 0.5
 
 
 def _is_low_liquidity_time(bar_time_unix: int) -> bool:
@@ -141,6 +149,11 @@ class ZigZagLineBreakStrategy(Strategy):
         self._bar_idx: int = -1
         # 最後に発火した転換方向 (連続再発火と pivot 由来の巻き戻り防止)
         self._last_fired_reversal_dir: Optional[str] = None
+        # ★ v8: 押し目エントリー用の極値トラッキング
+        # 転換 armed 後、転換方向の極値 (上昇なら highest, 下降なら lowest) を更新し、
+        # そこから anchor (= _reversal_z1_pivot_price) 方向に pullback_ratio 戻した
+        # 価格をエントリーターゲットとする。
+        self._pullback_extreme_price: Optional[float] = None
 
         # ★ AI フィルタ (オプション)
         # 設定すると、エントリ条件が揃った瞬間にこの関数で「本当に入るか」判断する。
@@ -324,9 +337,11 @@ class ZigZagLineBreakStrategy(Strategy):
             if self._near_any_line(price, atr_val):
                 self._reversal_direction = reversal_now
                 self._last_reversal_bar_idx = self._bar_idx
+                # ★ v8: 押し目用 extreme 初期化 (= 転換シグナル発火時の close)
+                self._pullback_extreme_price = price
                 ctx.log(
                     f"[reversal-armed] dir={reversal_now} bar={self._bar_idx} "
-                    f"price={price:.5f}"
+                    f"price={price:.5f} anchor={self._reversal_z1_pivot_price}"
                 )
             else:
                 ctx.log(
@@ -344,39 +359,66 @@ class ZigZagLineBreakStrategy(Strategy):
         age = self._bar_idx - self._last_reversal_bar_idx
         if age > p.lookback_bars:
             self._reversal_direction = None  # 期限切れリセット
+            self._pullback_extreme_price = None
             return
+
+        # ★ v8: 毎 bar で extreme を更新 (転換方向側の極値)
+        if self._pullback_extreme_price is None:
+            self._pullback_extreme_price = price
+        if self._reversal_direction == "up":
+            if cur.high > self._pullback_extreme_price:
+                self._pullback_extreme_price = cur.high
+        else:
+            if cur.low < self._pullback_extreme_price:
+                self._pullback_extreme_price = cur.low
 
         # 注: ライン付近判定は転換時に済んでいるため、エントリ判定では再チェックしない。
 
         if self._reversal_direction == "up":
-            # ロング条件
-            trigger = self._last_z2_high_after(self._last_reversal_bar_idx)
-            if trigger is None:
-                return
-            if price <= trigger.price:
-                return
-            # 壁前禁止 (上に上位足ラインが ATR×wall_atr_k 以内なら避ける)
-            if self._wall_above(price, atr_val):
-                ctx.log(
-                    f"[entry-skip] LONG blocked by wall_above bar={self._bar_idx} "
-                    f"price={price:.5f}"
-                )
-                return
-            # SL / TP
+            # ★ v8: H1/H4 trend が共に "up" でないとロングしない
+            if p.require_mtf_alignment:
+                h1_t = _dow_trend_from_pivots(list(self.z1_h1.pivots))
+                h4_t = _dow_trend_from_pivots(list(self.z1_h4.pivots))
+                if h1_t != "up" or h4_t != "up":
+                    return  # まだ整合性来てないので待機 (armed 維持)
+            # ★ v8: 押し目チェック (extreme から anchor 方向に pullback_ratio 戻ったか)
             if self._reversal_z1_pivot_price is None:
                 return
-            sl = self._reversal_z1_pivot_price - p.sl_buffer_k * atr_val
-            sl_dist = price - sl
+            anchor = self._reversal_z1_pivot_price            # = last_low.price (転換前の安値)
+            extreme = self._pullback_extreme_price            # = arm 後の最高値
+            swing_size = extreme - anchor
+            if swing_size <= 0:
+                return  # まだ swing が形成されてない
+            pullback_target = extreme - swing_size * p.pullback_ratio
+            # 当 bar の low が target を下抜けたなら押し目到達 → 指値約定想定
+            if cur.low > pullback_target:
+                return  # まだ来てない
+            # エントリー価格 = 押し目 target (limit order 約定想定)
+            entry_price = pullback_target
+            # 壁前禁止 (entry_price 基準で再チェック)
+            if self._wall_above(entry_price, atr_val):
+                ctx.log(
+                    f"[entry-skip] LONG blocked by wall_above bar={self._bar_idx} "
+                    f"entry_price={entry_price:.5f}"
+                )
+                self._reversal_direction = None
+                self._pullback_extreme_price = None
+                return
+            # SL / TP (entry_price 基準)
+            sl = anchor - p.sl_buffer_k * atr_val
+            sl_dist = entry_price - sl
             if sl_dist <= 0:
                 return
-            line_tp = self._next_line_above(price)
-            if line_tp is not None and (line_tp - price) >= p.min_rr * sl_dist:
+            line_tp = self._next_line_above(entry_price)
+            if line_tp is not None and (line_tp - entry_price) >= p.min_rr * sl_dist:
                 tp = line_tp
             else:
-                tp = price + p.tp_rr * sl_dist
+                tp = entry_price + p.tp_rr * sl_dist
             vol = self._risk_lot(ctx, sl_dist)
             if vol <= 0:
                 return
+            # 以降は entry_price を price として既存ロジックを再利用
+            price = entry_price
             # ★ v5: 時間帯フィルタ (流動性薄ゾーンはエントリ拒否)
             if p.block_low_liquidity and _is_low_liquidity_time(cur.time):
                 ctx.log(f"[entry-block] LONG blocked by low-liquidity time bar={self._bar_idx}")
@@ -425,31 +467,47 @@ class ZigZagLineBreakStrategy(Strategy):
             self._reversal_direction = None
 
         elif self._reversal_direction == "down":
-            trigger = self._last_z2_low_after(self._last_reversal_bar_idx)
-            if trigger is None:
-                return
-            if price >= trigger.price:
-                return
-            if self._wall_below(price, atr_val):
-                ctx.log(
-                    f"[entry-skip] SHORT blocked by wall_below bar={self._bar_idx} "
-                    f"price={price:.5f}"
-                )
-                return
+            # ★ v8: H1/H4 trend が共に "down" でないとショートしない
+            if p.require_mtf_alignment:
+                h1_t = _dow_trend_from_pivots(list(self.z1_h1.pivots))
+                h4_t = _dow_trend_from_pivots(list(self.z1_h4.pivots))
+                if h1_t != "down" or h4_t != "down":
+                    return
+            # ★ v8: 押し目チェック (extreme から anchor 方向に pullback_ratio 戻ったか)
             if self._reversal_z1_pivot_price is None:
                 return
-            sl = self._reversal_z1_pivot_price + p.sl_buffer_k * atr_val
-            sl_dist = sl - price
+            anchor = self._reversal_z1_pivot_price            # = last_high.price (転換前の高値)
+            extreme = self._pullback_extreme_price            # = arm 後の最安値
+            swing_size = anchor - extreme
+            if swing_size <= 0:
+                return
+            pullback_target = extreme + swing_size * p.pullback_ratio
+            # 当 bar の high が target を上抜けたら押し目到達
+            if cur.high < pullback_target:
+                return
+            entry_price = pullback_target
+            # 壁前禁止 (entry_price 基準)
+            if self._wall_below(entry_price, atr_val):
+                ctx.log(
+                    f"[entry-skip] SHORT blocked by wall_below bar={self._bar_idx} "
+                    f"entry_price={entry_price:.5f}"
+                )
+                self._reversal_direction = None
+                self._pullback_extreme_price = None
+                return
+            sl = anchor + p.sl_buffer_k * atr_val
+            sl_dist = sl - entry_price
             if sl_dist <= 0:
                 return
-            line_tp = self._next_line_below(price)
-            if line_tp is not None and (price - line_tp) >= p.min_rr * sl_dist:
+            line_tp = self._next_line_below(entry_price)
+            if line_tp is not None and (entry_price - line_tp) >= p.min_rr * sl_dist:
                 tp = line_tp
             else:
-                tp = price - p.tp_rr * sl_dist
+                tp = entry_price - p.tp_rr * sl_dist
             vol = self._risk_lot(ctx, sl_dist)
             if vol <= 0:
                 return
+            price = entry_price  # 以降は entry_price として既存ロジック流用
             # ★ v5: 時間帯フィルタ
             if p.block_low_liquidity and _is_low_liquidity_time(cur.time):
                 ctx.log(f"[entry-block] SHORT blocked by low-liquidity time bar={self._bar_idx}")
