@@ -5,3 +5,5 @@ deciders 配下の戦略モジュールをすべて import してレジストリ
 
 from . import zigzag_line_break  # noqa: F401
 from . import zigzag_ai  # noqa: F401
+from . import time_of_day  # noqa: F401
+from . import mtf_pullback  # noqa: F401

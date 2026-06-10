@@ -171,6 +171,61 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         log.info("WebSocket /ws disconnected")
 
 
+@app.websocket("/ws/logs")
+async def logs_endpoint(ws: WebSocket) -> None:
+    """EA からの非同期ログ受信エンドポイント。
+
+    EA は { type: "ea_logs", entries: [{ts, session, symbol, tag, msg}, ...] }
+    の JSON を送ってくる。サーバは data/ea_logs/<日時>_<remote>.jsonl に書き込む。
+
+    EA は fire-and-forget なので応答は不要。接続切れたら EA は再接続を試行。
+
+    出力先は環境変数 EA_LOG_DIR で上書き可能 (デフォルト: data/ea_logs)。
+    """
+    await ws.accept()
+    log_dir = Path(os.environ.get("EA_LOG_DIR", "data/ea_logs"))
+    log_dir.mkdir(parents=True, exist_ok=True)
+    from datetime import datetime as _dt
+    stamp = _dt.utcnow().strftime("%Y%m%d_%H%M%S")
+    client_port = ws.client.port if ws.client else "unknown"
+    log_path = log_dir / f"{stamp}_p{client_port}.jsonl"
+    log.info("EA logs connected: %s → %s", ws.client, log_path)
+    f = None
+    try:
+        f = open(log_path, "w", encoding="utf-8")
+        # メタ行
+        f.write(json.dumps({
+            "_type": "session_meta",
+            "started_at": _dt.utcnow().isoformat() + "Z",
+            "client": str(ws.client),
+        }, ensure_ascii=False) + "\n")
+        f.flush()
+        batch_count = 0
+        while True:
+            raw = await ws.receive_text()
+            try:
+                msg = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if msg.get("type") != "ea_logs":
+                continue
+            entries = msg.get("entries") or []
+            for entry in entries:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            batch_count += 1
+            # 10 バッチごとに flush (短時間ですぐ確認可能にする)
+            if batch_count % 10 == 0:
+                f.flush()
+    except WebSocketDisconnect:
+        log.info("EA logs disconnected: %s", ws.client)
+    except Exception as e:  # noqa: BLE001
+        log.warning("EA logs error: %s", e)
+    finally:
+        if f is not None:
+            try: f.close()
+            except Exception: pass
+
+
 def _bar_from_dict(d: dict) -> Bar:
     return Bar(
         time=int(d["time"]),

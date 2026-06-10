@@ -127,6 +127,10 @@ class StrategySession:
             "pullback_ratio": "PULLBACK_RATIO",
             "require_mtf_alignment": "REQUIRE_MTF_ALIGNMENT",
             "sl_buffer_k": "SL_BUFFER_K",
+            # mtf_pullback v2 / v3
+            "skip_on_trendline_break": "MTF_PB_TRENDLINE_SKIP",
+            "skip_on_daily_line": "MTF_PB_DLINE_SKIP",
+            "daily_wall_max_atr": "MTF_PB_DLINE_ATR",
         }
         for attr, env_key in env_overrides.items():
             v = os.environ.get(env_key)
@@ -271,23 +275,37 @@ class StrategySession:
                     color=ENTRY_BUY_COLOR if cmd["type"] == "buy" else ENTRY_SELL_COLOR,
                     font_size=14,
                 )
-                # AI が紐付けようとしている decision があれば pending として登録
+                # AI 戦略以外でも outcome 紐付けされるよう、デフォルトで entry を登録する。
+                # AI が _last_ai_decision を立ててたらそれを使う、無ければ匿名 decision_id で登録。
                 last_ai = getattr(self.strategy, "_last_ai_decision", None)
                 if last_ai and last_ai.get("direction"):
+                    direction = last_ai["direction"]
+                    decision_id = last_ai["decision_id"]
+                    features = last_ai.get("features") or {}
+                    decision = last_ai.get("decision") or {}
+                else:
+                    # 非 AI 戦略 (time_of_day 等): cmd の type から direction 決定
+                    direction = "up" if cmd["type"] == "buy" else "down"
+                    import uuid as _uuid
+                    decision_id = str(_uuid.uuid4())
+                    features = {}
+                    decision = {}
+                if True:
                     try:
                         self.outcome_tracker.register_entry(
-                            decision_id=last_ai["decision_id"],
-                            direction=last_ai["direction"],
+                            decision_id=decision_id,
+                            direction=direction,
                             entry_price=m15_bar.close,
                             entry_bar_time=m15_bar.time,
                             entry_bar_count=getattr(self.strategy, "_bar_idx", 0),
                             lot=float(cmd.get("volume") or 0.0),
                             sl=cmd.get("sl"),
                             tp=cmd.get("tp"),
-                            features=last_ai.get("features") or {},
-                            decision=last_ai.get("decision") or {},
+                            features=features,
+                            decision=decision,
                         )
-                        self.strategy._last_ai_decision = None
+                        if last_ai:
+                            self.strategy._last_ai_decision = None
                     except Exception:  # noqa: BLE001
                         pass
             elif cmd["type"] == "close":

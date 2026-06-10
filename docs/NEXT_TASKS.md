@@ -5,7 +5,19 @@
 
 ---
 
-## 🔴 P0 — 直近
+## 🔴 P0 (2026-06-11) — mtf_pullback 検証
+
+- [x] v1 (基本): 5.5y 12 ペア replay → 全ペア合算 ほぼゼロ、Edge GONE
+- [x] v2 (+H4/H1 トレンドライン break skip): 全ペア合算 +0.27%/月、ROBUST portfolio で **P1 +0.44% / P2 +0.54%** ← ⭐
+- [x] v3 (+D1/W1 重要ライン近接 skip): v2 より微悪。ライン filter の寄与は小
+- [ ] **v2 を FTO で実戦検証 (ROBUST 4 ペア: CADJPY/EURJPY/EURUSD/USDCAD)**
+  - スプレッド込みでも月利 0.4%超 出るか
+  - time_of_day のような壊滅にならないか (min_sl_dist_atr=0.3 で対策済)
+- [ ] WR を 50% 超に持っていく追加 filter 探索 (現状 49% でブレイクイーブン近辺)
+- [ ] min_sl_dist_atr の sensitivity (0.3 → 0.5 → 0.8 で取引数 vs 勝率)
+- [ ] M30 の dow trend を緩和 (現状 4 階層全部一致は厳しすぎる可能性)
+
+## 🔴 P0 — 旧 (zigzag_ai 系、保留)
 
 ### v5 の効果検証 (完了 ☑)
 - [x] 8 ペア並列で 6 か月相当バックテスト (118 outcomes)
