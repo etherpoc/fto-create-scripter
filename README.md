@@ -3,7 +3,57 @@
 自然言語で書かれた FX 売買ロジックを Python で実装し、**ローカル WS サーバ経由で
 Forex Tester Online (FTO) のロボットへ配信して実行**するワークスペース。
 
-## 2 つの動作モード
+---
+
+## 🏆 完成モデル: mtf_pullback v2 — MT5 スタンドアロン EA (JPY3 basket)
+
+研究の到達点。M5 + MTF(H1/M15)の ZigZag/ダウ理論ベースの押し目戦略を **MetaTrader5 の
+MQL5 EA に移植**し、**実機(Axiory)+実スプレッド+往復コミッションで net 検証して確定**した運用モデル。
+
+- 本体: [`strategies/standalone/mtf_pullback_v2.mq5`](strategies/standalone/mtf_pullback_v2.mq5)
+- **運用ドキュメント(必読)**: [`strategies/standalone/MT5_README.md`](strategies/standalone/MT5_README.md)
+
+### 実機検証で確定した結論
+
+**勝つのは JPY ペアのみ**(値幅が大きくコスト耐性が高い)。非JPY(EURUSD 等タイトSL)はコストで負ける。
+
+| ペア | 実機 net/2年 | WR | PF | DD |
+|---|---|---|---|---|
+| USDJPY | +9.8% | 59% | 1.92 | 3.3% |
+| GBPJPY | +9.4% | 56% | 1.65 | 3.3% |
+| EURJPY | +3.5% | 47% | 1.20 | 7.6% |
+
+→ **JPY3 basket (USDJPY/GBPJPY/EURJPY)** を運用設定として確定。
+
+### セットアップ方法 (MT5)
+
+1. **コンパイル**: MetaEditor で `mtf_pullback_v2.mq5` を開き F7(0 errors/0 warnings)。
+2. **各ペアの M5 チャートに EA を 1 つずつ適用**(USDJPY / GBPJPY / EURJPY の 3 枚)。
+3. **パラメータ**(テスター/EA 入力欄は `//` コメントのラベルで表示される):
+
+   | ラベル | 値 |
+   |---|---|
+   | `Risk % per trade (1=1%)` | **0.5** ← 3枚合成 DD<10% に収める唯一の値 |
+   | `絶対最小SL pips (...)` | **20** ← タイトSL=コスト負け除外(実機必須) |
+   | `Block hour start / end UTC` | **6 / 10** |
+   | `Server->UTC offset hours` | **ブローカー依存**(Axiory 夏 −3 / 冬 −2) |
+   | `TP RR` / `Align` / `room_R max` | 1.5 / 1 / 2.0 |
+
+4. **起動後**: Experts ログの `[mtfpb] ENTRY ... risk$=...` で **risk$ が残高の約0.5%** か必ず目視確認。
+
+### 期待値と位置づけ(誇張なし)
+
+- **net 年 +4〜6% / 合成DD 約8% / 日次最悪 −1%台**。低リスク・プロップ適合の堅実戦略。
+- ★ JPY3 は**対円相関が高く同時逆行で合成DDが重なる**ため、per-pair risk=0.5% が必須。
+- これは 6-8%/月 の目標には届かない(約1/10)。**「負けない堅実な土台」**としての位置づけ。
+- 検証の全過程(netコスト評価・ペア選定・サイジング)は [`docs/IMPROVEMENT_RESULTS.md`](docs/IMPROVEMENT_RESULTS.md)。
+
+> ⚠️ **教訓**: Python バックテストは長らく **gross(スプレッド/コミッション抜き)** で、実コストを入れると
+> 全12ペア分散は net 負け、JPY3 のみ生存と判明した。**実機・実コストで検証するまで「勝てる」と言わない**。
+
+---
+
+## 2 つの動作モード (FTO thin-client 構成)
 
 ### A. ローカル backtest (FTO なしで完結)
 
