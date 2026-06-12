@@ -29,13 +29,19 @@ FTO 版 `mtf_pullback_v2.js` を **MQL5 に忠実移植**した MetaTrader5 用 
 | `絶対最小SL pips (...)` (`InpMinSlPips`) | **20** | タイトSL=コスト負け層を除外(実機で必須) |
 | `Block hour start UTC (-1=off)` | **6** | ロンドン午前の高ボラ除外 |
 | `Block hour end UTC` | 10 | |
-| `Server->UTC offset hours` (`InpServerUtcOffset`) | **ブローカー依存** | ★Axiory 夏=-3 / 冬=-2。block_hour を UTC 基準で効かせるため |
+| `UTCオフセット自動(...)` (`InpAutoUtcOffset`) | **true(既定)** | ★EET(GMT+2/+3)+DSTを日付から自動判定。**設定不要** |
+| `手動Server->UTC offset` (`InpServerUtcOffset`) | (Autoがtrueなら無視) | 非EETブローカーのみ Auto=false で手動指定 |
 | `TP RR (1.5=1:1.5)` | 1.5 | |
 | `Align (1=H1+M15,...)` | 1 | H1+M15 のみ(H4/M30 は無関係) |
 | `room_R max (0=off)` | 2.0 | |
 
 > ⚠ **MT5 テスターの入力名は変数名でなく `//` コメント(ラベル)で表示される。** 上表のラベルで探すこと。
 > ラベル行が無ければ古い .ex5 → MetaEditor で再コンパイルしてテスターの Expert を選び直す。
+
+> **UTCオフセットは自動化済み(2026-06-12)**: `InpAutoUtcOffset=true`(既定)で、EET サーバー
+> (GMT+2冬/+3夏 = Axiory・Fintokei 等ほぼ全FXブローカー)の DST をバー日付から自動判定。手動設定不要。
+> `TimeGMT()` はテスターで信頼できない(GMT==server 扱い)ため日付ベースで算出 = テスター/ライブ共通で正しい。
+> init ログに `UTCoffset = AUTO(EET+DST) ... server-3→UTC ... DST=夏` と解決値が出る。非EETブローカーのみ手動。
 
 ### 期待値(プロップ運用)
 

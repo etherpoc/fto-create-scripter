@@ -40,7 +40,8 @@ input int    InpAlignMode       = 1;       // Align (1=H1+M15, 2=+H4, 3=+H4+M30)
 input double InpRoomRMax        = 2.0;      // room_R max (0=off)
 input int    InpBlockHourStart  = 6;       // Block hour start UTC (-1=off)
 input int    InpBlockHourEnd    = 10;      // Block hour end UTC
-input int    InpServerUtcOffset = 0;       // Server->UTC offset hours (GMT+3 broker => -3)
+input bool   InpAutoUtcOffset   = true;    // ★UTCオフセット自動(EET=GMT+2/+3前提・DST自動)。falseで下記手動値を使用
+input int    InpServerUtcOffset = -3;      // 手動Server->UTC offset (AutoがOFFの時のみ。GMT+3=>-3)
 input double InpMinSlPips        = 0.0;     // 絶対最小SL pips (タイトSL=コスト負け除外, 0=off, 推奨15-20)
 input bool   InpCsvLog          = true;    // entry/outcome を CSV (MQL5/Files) に保存
 input int    InpDiagEvery       = 0;       // N本ごとに診断 Print (0=off)
@@ -276,6 +277,39 @@ double   g_eEntry=0, g_eSL=0, g_eTP=0, g_eSLdist=0, g_eLot=0;
 datetime g_eTime=0;
 
 //+------------------------------------------------------------------+
+//| UTC オフセット解決: Auto=EET(GMT+2/+3) + EU DST を日付から自動判定。 |
+//|  TimeGMT() はテスターで信頼できない(GMT==server扱い)ため、バーの    |
+//|  日付から DST を計算する方式にする(テスター/ライブ共通で正しく動く)。 |
+//|  返り値 = server時刻に足すと UTC になる時間数 (GMT+3 => -3)。         |
+//+------------------------------------------------------------------+
+datetime LastSundayUTC(int year, int month)
+{
+   // 当月末日を求める(翌月1日の前日)
+   int nm = (month == 12) ? 1 : month + 1;
+   int ny = (month == 12) ? year + 1 : year;
+   MqlDateTime t1; t1.year=ny; t1.mon=nm; t1.day=1; t1.hour=0; t1.min=0; t1.sec=0;
+   datetime firstNext = StructToTime(t1);
+   datetime lastDay = firstNext - 86400;             // 当月末日 00:00
+   MqlDateTime w; TimeToStruct(lastDay, w);
+   return lastDay - w.day_of_week * 86400;           // day_of_week: 0=日曜
+}
+
+bool IsEuDst(datetime t)
+{
+   MqlDateTime d; TimeToStruct(t, d);
+   datetime start = LastSundayUTC(d.year, 3);        // 3月最終日曜
+   datetime end   = LastSundayUTC(d.year, 10);       // 10月最終日曜
+   return (t >= start && t < end);
+}
+
+int ResolveUtcOffset(datetime serverTime)
+{
+   if(!InpAutoUtcOffset) return InpServerUtcOffset;
+   // EET: 夏(DST)= GMT+3 => offset -3 / 冬 = GMT+2 => offset -2
+   return IsEuDst(serverTime) ? -3 : -2;
+}
+
+//+------------------------------------------------------------------+
 int OnInit()
 {
    double dev = ZZ_DEV_PIPS * DEV_PIP;
@@ -300,9 +334,14 @@ int OnInit()
                           "lot","risk_amt","balance","atr","major");
    }
 
-   PrintFormat("[mtfpb] init sym=%s acct_ccy=%s risk%%=%.2f rr=%.1f align=%d roomR=%.1f block=[%d,%d) utcoff=%d minSL=%.0fp",
+   datetime now = TimeCurrent();
+   int offNow = ResolveUtcOffset(now);
+   PrintFormat("[mtfpb] init sym=%s acct_ccy=%s risk%%=%.2f rr=%.1f align=%d roomR=%.1f block=[%d,%d) minSL=%.0fp",
                _Symbol, AccountInfoString(ACCOUNT_CURRENCY), InpRiskPct, InpTpRR,
-               InpAlignMode, InpRoomRMax, InpBlockHourStart, InpBlockHourEnd, InpServerUtcOffset, InpMinSlPips);
+               InpAlignMode, InpRoomRMax, InpBlockHourStart, InpBlockHourEnd, InpMinSlPips);
+   PrintFormat("[mtfpb] UTCoffset = %s (現時点 server%+d→UTC, server=%s / DST=%s)",
+               (InpAutoUtcOffset ? "AUTO(EET+DST)" : "MANUAL"), offNow,
+               TimeToString(now, TIME_DATE|TIME_MINUTES), (IsEuDst(now) ? "夏" : "冬"));
    return INIT_SUCCEEDED;
 }
 
@@ -459,10 +498,11 @@ void OnNewM5Bar()
    // 4. クールダウン
    if(g_barIdx - g_lastEntryBar < COOLDOWN_BARS) return;
 
-   // 4b. 時間帯フィルタ (UTC)
+   // 4b. 時間帯フィルタ (UTC)。オフセットは Auto(EET+DST) or 手動。
    if(InpBlockHourStart >= 0)
    {
-      int hourUtc = (int)(((long)t1/3600 + InpServerUtcOffset) % 24);
+      int off = ResolveUtcOffset(t1);
+      int hourUtc = (int)(((long)t1/3600 + off) % 24);
       if(hourUtc < 0) hourUtc += 24;
       if(hourUtc >= InpBlockHourStart && hourUtc < InpBlockHourEnd) return;
    }
