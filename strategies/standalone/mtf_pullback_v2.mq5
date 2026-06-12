@@ -35,6 +35,7 @@
 input double InpRiskPct         = 1.0;     // Risk % per trade (1=1%)
 input int    InpMagic           = 220611;  // Magic Number
 input double InpMaxLot          = 50.0;    // Max Lot (safety cap)
+input double InpMaxTotalRiskPct = 3.0;     // Fintokei: 同時保有リスク上限% (0=off)。超える新規はスキップ
 input double InpTpRR            = 1.5;      // TP RR (1.5=1:1.5)
 input int    InpAlignMode       = 1;       // Align (1=H1+M15, 2=+H4, 3=+H4+M30)
 input double InpRoomRMax        = 2.0;      // room_R max (0=off)
@@ -410,6 +411,29 @@ void PushM5Trend(int t)
 }
 
 //+------------------------------------------------------------------+
+// Fintokei: 口座全体の「保有中ポジションのSL基準リスク合計%」(全シンボル・全magic・手動含む)
+double AccountOpenRiskPct()
+{
+   double bal = AccountInfoDouble(ACCOUNT_BALANCE);
+   if(bal <= 0) return 0.0;
+   double total = 0.0;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong tk = PositionGetTicket(i);
+      if(tk == 0 || !PositionSelectByTicket(tk)) continue;
+      double slp = PositionGetDouble(POSITION_SL);
+      if(slp <= 0) continue;
+      string sym = PositionGetString(POSITION_SYMBOL);
+      double vol = PositionGetDouble(POSITION_VOLUME);
+      double open = PositionGetDouble(POSITION_PRICE_OPEN);
+      ENUM_ORDER_TYPE ot = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+      double pr = 0.0;
+      if(OrderCalcProfit(ot, sym, vol, open, slp, pr) && pr < 0) total += -pr;
+   }
+   return 100.0 * total / bal;
+}
+
+//+------------------------------------------------------------------+
 //| 現在ポジション (自 magic / 自 symbol)。side: 1=long -1=short 0=none |
 //+------------------------------------------------------------------+
 bool HasPosition(int &side)
@@ -581,6 +605,21 @@ void OnNewM5Bar()
 
    // ---- 発注 ----
    double nSL = NormalizeDouble(sl, _Digits);
+   // Fintokei: 同時保有リスク上限チェック(新規の実リスクは OrderCalcProfit で算定)
+   if(InpMaxTotalRiskPct > 0)
+   {
+      double curRiskPct = AccountOpenRiskPct();
+      double newProfit = 0.0, newRiskPct = 0.0;
+      ENUM_ORDER_TYPE ot = (side==1) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+      if(OrderCalcProfit(ot, _Symbol, lot, price, nSL, newProfit))
+         newRiskPct = 100.0 * MathAbs(newProfit) / balance;
+      if(curRiskPct + newRiskPct > InpMaxTotalRiskPct + 1e-9)
+      {
+         PrintFormat("[mtfpb] SKIP(Fintokei) %s 保有リスク%.2f%% + 新規%.2f%% > 上限%.1f%%",
+                     _Symbol, curRiskPct, newRiskPct, InpMaxTotalRiskPct);
+         return;
+      }
+   }
    double nTP = NormalizeDouble(tp, _Digits);
    bool ok;
    if(side==1) ok = g_trade.Buy (lot, _Symbol, 0.0, nSL, nTP, "mtfpb_v2");

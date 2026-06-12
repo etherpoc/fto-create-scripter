@@ -56,6 +56,12 @@ FTO 版 `mtf_pullback_v2.js` を **MQL5 に忠実移植**した MetaTrader5 用 
 - 最初のエントリー `[mtfpb] ENTRY ... risk$=...` で **risk$ が残高の約0.5%** か必ず目視。
 - `InpCsvLog=true` で `MQL5/Files`(テスターは Tester 配下)に entry/outcome の CSV を保存。
 
+### Fintokei: 同時保有リスク上限 (`InpMaxTotalRiskPct`, 既定3.0)
+
+プロップの「同時に持てるリスク 3% まで」ルール用。新規エントリー時に **口座全体(全シンボル・
+全 magic・手動含む)の保有中ポジションSL基準リスク合計 + 新規リスク が上限超ならスキップ**
+(`OrderCalcProfit` で各ポジの open→SL 損失を算定)。スキップ時は `[mtfpb] SKIP(Fintokei) ...`。0=off。
+
 ---
 
 ## 移植の検証状況
