@@ -122,15 +122,21 @@ bool HasPosition(int &side)
    side = 0; return false;
 }
 
-double RiskLot(double slDist, double &riskAmt, double &bal)
+// SL距離あたりの 1lot 損失を OrderCalcProfit で正確に計算(通貨換算を全自動)。
+// SYMBOL_TRADE_TICK_VALUE はゴールド×非USD口座等で誤値を返すため信用しない。
+double RiskLot(int side, double entry, double sl, double &riskAmt, double &bal, double &moneyPerLot)
 {
    bal = AccountInfoDouble(ACCOUNT_BALANCE);
    riskAmt = bal * (InpRiskPct / 100.0);
-   if(bal <= 0 || slDist <= 0) return 0.0;
-   double tv = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
-   double ts = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-   if(tv <= 0 || ts <= 0) return 0.0;
-   double moneyPerLot = (slDist / ts) * tv;
+   moneyPerLot = 0.0;
+   if(bal <= 0) return 0.0;
+   double slDist = MathAbs(entry - sl);
+   if(slDist <= 0) return 0.0;
+   ENUM_ORDER_TYPE ot = (side == 1) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+   double profit = 0.0;
+   // entry→sl の損益(口座通貨)。買いなら sl<entry で負、その絶対値が 1lot のリスク。
+   if(!OrderCalcProfit(ot, _Symbol, 1.0, entry, sl, profit)) return 0.0;
+   moneyPerLot = MathAbs(profit);
    if(moneyPerLot <= 0) return 0.0;
    double lot = riskAmt / moneyPerLot;
    double mn = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
@@ -194,16 +200,19 @@ void OpenPos(int side, double atr)
    double slDist = InpSlAtr * atr;
    double sl = (side == 1) ? price - slDist : price + slDist;
    sl = NormalizeDouble(sl, _Digits);
-   double riskAmt, bal;
-   double lot = RiskLot(slDist, riskAmt, bal);
+   double riskAmt, bal, moneyPerLot;
+   double lot = RiskLot(side, price, sl, riskAmt, bal, moneyPerLot);
    if(lot <= 0){ PrintFormat("[bo_h1] skip size slDist=%.5f", slDist); return; }
+   // サイズ検証: この lot の実損(口座通貨)が risk% 近傍か
+   double realRisk = lot * moneyPerLot;
    bool ok = (side == 1) ? g_trade.Buy(lot, _Symbol, 0.0, sl, 0.0, "bo_h1")
                          : g_trade.Sell(lot, _Symbol, 0.0, sl, 0.0, "bo_h1");
    if(!ok){ PrintFormat("[bo_h1] ORDER FAIL ret=%d %s", g_trade.ResultRetcode(), g_trade.ResultRetcodeDescription()); return; }
    double fill = g_trade.ResultPrice(); if(fill <= 0) fill = price;
    g_eValid=true; g_eSide=side; g_eEntry=fill; g_eSL=sl; g_eLot=lot; g_eTime=iTime(_Symbol,TF,0);
-   PrintFormat("[bo_h1] ENTRY %s %s price=%.5f sl=%.5f lot=%.2f risk$=%.2f (bal=%.2f) atr=%.5f",
-               (side==1?"long":"short"), _Symbol, fill, sl, lot, riskAmt, bal, atr);
+   PrintFormat("[bo_h1] ENTRY %s %s price=%.5f sl=%.5f lot=%.2f risk%s=%.2f 実損≈%.2f (bal=%.2f) atr=%.5f",
+               (side==1?"long":"short"), _Symbol, fill, sl, lot,
+               AccountInfoString(ACCOUNT_CURRENCY), riskAmt, realRisk, bal, atr);
    if(g_csv != INVALID_HANDLE)
    {
       FileWrite(g_csv, "entry", TimeToString(g_eTime, TIME_DATE|TIME_MINUTES),
