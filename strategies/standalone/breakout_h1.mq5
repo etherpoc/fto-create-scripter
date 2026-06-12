@@ -12,10 +12,13 @@
 //|   エグジット: 前 exit_n 本安値のトレール割れ、または SL ヒット。      |
 //|   サイズ: 口座 risk% を SL距離で逆算 (tick value で口座通貨建て)。   |
 //|                                                                  |
-//|  == 推奨運用 (研究の net 検証) ==                                  |
-//|   ペア: XAUUSD/USDJPY/EURJPY/GBPJPY/AUDJPY/CADJPY/USDCHF を各H1に。 |
-//|   既定 SL3/SMA150(7ペア分散)。risk 0.25%/pair で合成 年+23%/DD8.5%。 |
+//|  == 採用運用設定 (MT5実機検証で確定 2026-06-12) ==                 |
+//|   ペア: XAUUSD/USDJPY/EURJPY/AUDJPY/GBPJPY の5枚を各H1チャートに。   |
+//|     (USDCHF/CADJPY は実機で剥落 → 除外)                          |
+//|   既定 SL3/SMA150/long-only/risk0.5%。                            |
+//|   実機補正・合算: 月利+2.62% / 合成DD9.4% / 年+36%(2024-26)。       |
 //|   ★ レジーム依存(2021-26の金高/円安トレンドに乗る)。反転に注意。   |
+//|   ★ サイズは OrderCalcProfit で口座通貨正確換算(非USD口座も安全)。 |
 //|                                                                  |
 //|  ※ バックテストは Donchian level 約定、本EAは確定足 close 成行約定   |
 //|     なので実機はわずかに保守的(正直方向)。実コスト/フィードで要確認。 |
@@ -32,7 +35,7 @@ input int    InpExitN      = 25;       // Donchian トレール lookback (本)
 input int    InpAtrN       = 20;       // ATR period
 input double InpSlAtr      = 3.0;      // SL = sl_atr × ATR (SL3推奨/2も可)
 input int    InpSmaN       = 150;      // トレンドフィルタ SMA (150推奨/100も可, 0=off)
-input double InpRiskPct    = 0.25;     // Risk % per trade (バスケット7ペアでDD<10%)
+input double InpRiskPct    = 0.5;      // Risk % per trade (採用5ペア合算で月+2.62%/DD9.4%)
 input int    InpMagic      = 220612;   // Magic Number
 input double InpMaxLot     = 50.0;     // Max Lot (safety cap)
 input bool   InpLongOnly   = true;     // long-only (推奨true。falseでshortも)
