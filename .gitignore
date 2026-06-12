@@ -48,3 +48,4 @@ server/certs/*.pem
 
 # ログ
 *.log
+data/cache/
