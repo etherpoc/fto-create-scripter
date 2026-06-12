@@ -5,6 +5,27 @@
 
 ---
 
+## ✅ 完了: MT5移植 + net確定 + JPY3 basket (2026-06-12)
+
+詳細は PROGRESS.md「現状整理」/ IMPROVEMENT_RESULTS.md / strategies/standalone/MT5_README.md。
+
+- [x] mtf_pullback v2 を MQL5 へ移植 (`mtf_pullback_v2.mq5`)。コンパイル0/0・実機一致確認。
+- [x] **net コスト評価**(スプレッド+コミ)を導入 → 全12分散は net 負け、**JPYペアのみ生存**と判明。
+- [x] **絶対最小SL(minSL=20)** をフィルタ追加(タイトSL=コスト死を除外)。EAデフォルト化。
+- [x] **MT5実機検証**(Axiory): USDJPY+9.8%/GBPJPY+9.4%/EURJPY+3.5% net黒字。EURUSD/XAU は除外。
+- [x] **JPY3 basket を運用設定として確定**: USDJPY/GBPJPY/EURJPY, **risk 0.5%/pair**(合成DD<10%)。
+- [x] **UTCオフセット自動化**(EET+DST 日付判定)。
+
+## 🔵 現在進行中 / 次
+
+- [ ] **JPY3 basket を数か月フォワード運用**(ユーザ判断)。各M5チャート・risk0.5%・3ペア。
+  - 低頻度(月1回/ペース)なので四半期〜半年スパンで評価。合成DDが8%超なら見直し。
+- [ ] **Fintokei で履歴品質を上げて再テスト**(現状76% → M5チャートをHomeでフルDL → 再走)。
+- [ ] **B: 6-8%/月を狙う別ロジック**(集中型/ブレイクアウト/イベント)。JPY3は年+5%が天井のため、
+  目標達成には設計帯域の違う新規開発が必要。方向性決めから。
+
+---
+
 ## 🔴 P0 (2026-06-11) — mtf_pullback 検証
 
 - [x] v1 (基本): 5.5y 12 ペア replay → 全ペア合算 ほぼゼロ、Edge GONE
