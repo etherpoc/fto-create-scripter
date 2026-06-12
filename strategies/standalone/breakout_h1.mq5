@@ -1,0 +1,232 @@
+//+------------------------------------------------------------------+
+//|  breakout_h1.mq5 — MT5 H1 Donchian ブレイクアウト EA (long-only)   |
+//|                                                                  |
+//|  研究(B)で見つけた H1 long-only ブレイクアウト・バスケットの実装。   |
+//|  確定H1足ベース。tools/breakout_lab.run_bo (NumPy版 bo_fast) と     |
+//|  同一ロジックを MQL5 へ移植。                                       |
+//|                                                                  |
+//|  == ロジック ==                                                   |
+//|   エントリー(flat時): 前 entry_n 本の高値を当足高値がブレイク かつ   |
+//|     close > SMA(sma_n)  → 成行ロング。SL = fill - sl_atr×ATR。      |
+//|     (long-only。short は研究で負けと判明)                          |
+//|   エグジット: 前 exit_n 本安値のトレール割れ、または SL ヒット。      |
+//|   サイズ: 口座 risk% を SL距離で逆算 (tick value で口座通貨建て)。   |
+//|                                                                  |
+//|  == 推奨運用 (研究の net 検証) ==                                  |
+//|   ペア: XAUUSD/USDJPY/EURJPY/GBPJPY/AUDJPY/CADJPY/USDCHF を各H1に。 |
+//|   既定 SL3/SMA150(7ペア分散)。risk 0.25%/pair で合成 年+23%/DD8.5%。 |
+//|   ★ レジーム依存(2021-26の金高/円安トレンドに乗る)。反転に注意。   |
+//|                                                                  |
+//|  ※ バックテストは Donchian level 約定、本EAは確定足 close 成行約定   |
+//|     なので実機はわずかに保守的(正直方向)。実コスト/フィードで要確認。 |
+//+------------------------------------------------------------------+
+#property copyright "fto-create-scripter"
+#property version   "1.00"
+#property strict
+
+#include <Trade/Trade.mqh>
+
+//============================ 入力 ============================
+input int    InpEntryN     = 30;       // Donchian entry lookback (本)
+input int    InpExitN      = 25;       // Donchian トレール lookback (本)
+input int    InpAtrN       = 20;       // ATR period
+input double InpSlAtr      = 3.0;      // SL = sl_atr × ATR (SL3推奨/2も可)
+input int    InpSmaN       = 150;      // トレンドフィルタ SMA (150推奨/100も可, 0=off)
+input double InpRiskPct    = 0.25;     // Risk % per trade (バスケット7ペアでDD<10%)
+input int    InpMagic      = 220612;   // Magic Number
+input double InpMaxLot     = 50.0;     // Max Lot (safety cap)
+input bool   InpLongOnly   = true;     // long-only (推奨true。falseでshortも)
+input bool   InpCsvLog     = true;     // entry/exit を CSV (MQL5/Files) に保存
+
+#define TF PERIOD_H1
+
+CTrade   g_trade;
+datetime g_lastBar = 0;
+int      g_csv = INVALID_HANDLE;
+// 直近エントリー記録(outcomeログ用)
+bool     g_eValid=false; int g_eSide=0; double g_eEntry=0,g_eSL=0,g_eLot=0; datetime g_eTime=0;
+
+//+------------------------------------------------------------------+
+int OnInit()
+{
+   g_trade.SetExpertMagicNumber(InpMagic);
+   g_trade.SetTypeFillingBySymbol(_Symbol);
+   g_trade.SetDeviationInPoints(30);
+   if(InpCsvLog)
+   {
+      string fn = "breakout_h1_" + _Symbol + ".csv";
+      g_csv = FileOpen(fn, FILE_WRITE|FILE_CSV|FILE_ANSI, ',');
+      if(g_csv != INVALID_HANDLE)
+         FileWrite(g_csv, "type","time","side","price","sl","lot","risk_amt","balance","atr");
+   }
+   PrintFormat("[bo_h1] init sym=%s ccy=%s en=%d ex=%d atr=%d SL=%.1f SMA=%d risk%%=%.2f longonly=%s",
+               _Symbol, AccountInfoString(ACCOUNT_CURRENCY), InpEntryN, InpExitN, InpAtrN,
+               InpSlAtr, InpSmaN, InpRiskPct, (InpLongOnly?"true":"false"));
+   return INIT_SUCCEEDED;
+}
+
+void OnDeinit(const int reason)
+{
+   if(g_csv != INVALID_HANDLE){ FileClose(g_csv); g_csv = INVALID_HANDLE; }
+}
+
+//+------------------------------------------------------------------+
+//| 指標ヘルパー(確定足 shift>=1 ベース。当足=shift1)                  |
+//+------------------------------------------------------------------+
+// 前 n 本(shift 2..n+1)の最高値 = 当足(shift1)が超えるべき Donchian
+double DonchHigh(int n)
+{
+   double m = -DBL_MAX;
+   for(int k = 2; k <= n + 1; k++){ double v = iHigh(_Symbol, TF, k); if(v > m) m = v; }
+   return m;
+}
+double DonchLow(int n)
+{
+   double m = DBL_MAX;
+   for(int k = 2; k <= n + 1; k++){ double v = iLow(_Symbol, TF, k); if(v < m) m = v; }
+   return m;
+}
+// 前 n 本(shift 2..n+1)の SMA(close)
+double SmaPrev(int n)
+{
+   if(n <= 0) return 0.0;
+   double s = 0.0;
+   for(int k = 2; k <= n + 1; k++) s += iClose(_Symbol, TF, k);
+   return s / n;
+}
+// 前 n 本(shift 2..n+1)の TR 平均 = atr_at(bars,i-1,n) 相当
+double AtrPrev(int n)
+{
+   double s = 0.0;
+   for(int k = 2; k <= n + 1; k++)
+   {
+      double hh = iHigh(_Symbol, TF, k), ll = iLow(_Symbol, TF, k), pc = iClose(_Symbol, TF, k + 1);
+      if(pc == 0) return 0.0;
+      s += MathMax(hh - ll, MathMax(MathAbs(hh - pc), MathAbs(ll - pc)));
+   }
+   return s / n;
+}
+
+//+------------------------------------------------------------------+
+bool HasPosition(int &side)
+{
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong tk = PositionGetTicket(i);
+      if(tk == 0 || !PositionSelectByTicket(tk)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      if((int)PositionGetInteger(POSITION_MAGIC) != InpMagic) continue;
+      side = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY) ? 1 : -1;
+      return true;
+   }
+   side = 0; return false;
+}
+
+double RiskLot(double slDist, double &riskAmt, double &bal)
+{
+   bal = AccountInfoDouble(ACCOUNT_BALANCE);
+   riskAmt = bal * (InpRiskPct / 100.0);
+   if(bal <= 0 || slDist <= 0) return 0.0;
+   double tv = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   double ts = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   if(tv <= 0 || ts <= 0) return 0.0;
+   double moneyPerLot = (slDist / ts) * tv;
+   if(moneyPerLot <= 0) return 0.0;
+   double lot = riskAmt / moneyPerLot;
+   double mn = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double mx = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   double st = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   if(st > 0) lot = MathFloor(lot / st) * st;
+   if(lot > InpMaxLot) lot = InpMaxLot;
+   if(lot > mx) lot = mx;
+   if(lot < mn) return 0.0;
+   return lot;
+}
+
+//+------------------------------------------------------------------+
+void OnTick()
+{
+   datetime t0 = iTime(_Symbol, TF, 0);
+   if(t0 <= 0 || t0 == g_lastBar) return;   // 新しい確定足のみ処理
+   g_lastBar = t0;
+   if(Bars(_Symbol, TF) < InpEntryN + InpAtrN + InpSmaN + 5) return;  // ウォームアップ
+
+   double atr = AtrPrev(InpAtrN);
+   if(atr <= 0) return;
+
+   int side; bool has = HasPosition(side);
+
+   // 保有中: トレール/SL でクローズ
+   if(has)
+   {
+      double bl = iLow(_Symbol, TF, 1), bh = iHigh(_Symbol, TF, 1);
+      if(side == 1)
+      {
+         double trail = DonchLow(InpExitN);
+         // SL は建玉に設定済(ブローカー側)。トレール割れは EA がクローズ
+         if(bl <= trail) { ClosePos("trail"); }
+      }
+      else
+      {
+         double trail = DonchHigh(InpExitN);
+         if(bh >= trail) { ClosePos("trail"); }
+      }
+      return;
+   }
+
+   // flat: エントリー判定(確定足 shift1)
+   double bh1 = iHigh(_Symbol, TF, 1), bl1 = iLow(_Symbol, TF, 1), bc1 = iClose(_Symbol, TF, 1);
+   double dhi = DonchHigh(InpEntryN), dlo = DonchLow(InpEntryN);
+   double sma = SmaPrev(InpSmaN);
+   bool longOK  = (bh1 > dhi) && (InpSmaN == 0 || bc1 > sma);
+   bool shortOK = (!InpLongOnly) && (bl1 < dlo) && (InpSmaN == 0 || bc1 < sma);
+
+   if(longOK)       OpenPos(1, atr);
+   else if(shortOK) OpenPos(-1, atr);
+}
+
+//+------------------------------------------------------------------+
+void OpenPos(int side, double atr)
+{
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double price = (side == 1) ? ask : bid;
+   double slDist = InpSlAtr * atr;
+   double sl = (side == 1) ? price - slDist : price + slDist;
+   sl = NormalizeDouble(sl, _Digits);
+   double riskAmt, bal;
+   double lot = RiskLot(slDist, riskAmt, bal);
+   if(lot <= 0){ PrintFormat("[bo_h1] skip size slDist=%.5f", slDist); return; }
+   bool ok = (side == 1) ? g_trade.Buy(lot, _Symbol, 0.0, sl, 0.0, "bo_h1")
+                         : g_trade.Sell(lot, _Symbol, 0.0, sl, 0.0, "bo_h1");
+   if(!ok){ PrintFormat("[bo_h1] ORDER FAIL ret=%d %s", g_trade.ResultRetcode(), g_trade.ResultRetcodeDescription()); return; }
+   double fill = g_trade.ResultPrice(); if(fill <= 0) fill = price;
+   g_eValid=true; g_eSide=side; g_eEntry=fill; g_eSL=sl; g_eLot=lot; g_eTime=iTime(_Symbol,TF,0);
+   PrintFormat("[bo_h1] ENTRY %s %s price=%.5f sl=%.5f lot=%.2f risk$=%.2f (bal=%.2f) atr=%.5f",
+               (side==1?"long":"short"), _Symbol, fill, sl, lot, riskAmt, bal, atr);
+   if(g_csv != INVALID_HANDLE)
+   {
+      FileWrite(g_csv, "entry", TimeToString(g_eTime, TIME_DATE|TIME_MINUTES),
+                (side==1?"long":"short"), fill, sl, lot, riskAmt, bal, atr);
+      FileFlush(g_csv);
+   }
+}
+
+void ClosePos(string reason)
+{
+   if(!g_trade.PositionClose(_Symbol))
+   {
+      PrintFormat("[bo_h1] CLOSE FAIL ret=%d", g_trade.ResultRetcode()); return;
+   }
+   double px = g_trade.ResultPrice();
+   double pnl = (g_eSide == 1) ? (px - g_eEntry) : (g_eEntry - px);
+   PrintFormat("[bo_h1] EXIT(%s) %s px=%.5f pnl_price~=%.5f", reason, _Symbol, px, pnl);
+   if(g_csv != INVALID_HANDLE)
+   {
+      FileWrite(g_csv, "exit", TimeToString(iTime(_Symbol,TF,0), TIME_DATE|TIME_MINUTES),
+                (g_eSide==1?"long":"short"), px, g_eSL, g_eLot, 0.0, AccountInfoDouble(ACCOUNT_BALANCE), reason);
+      FileFlush(g_csv);
+   }
+   g_eValid = false;
+}
+//+------------------------------------------------------------------+
