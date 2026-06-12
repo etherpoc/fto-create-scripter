@@ -42,7 +42,7 @@ input int    InpBlockHourStart  = 6;       // Block hour start UTC (-1=off)
 input int    InpBlockHourEnd    = 10;      // Block hour end UTC
 input bool   InpAutoUtcOffset   = true;    // ★UTCオフセット自動(EET=GMT+2/+3前提・DST自動)。falseで下記手動値を使用
 input int    InpServerUtcOffset = -3;      // 手動Server->UTC offset (AutoがOFFの時のみ。GMT+3=>-3)
-input double InpMinSlPips        = 0.0;     // 絶対最小SL pips (タイトSL=コスト負け除外, 0=off, 推奨15-20)
+input double InpMinSlPips        = 20.0;    // 絶対最小SL pips (タイトSL=コスト負け除外, 0=off, 確定値20)
 input bool   InpCsvLog          = true;    // entry/outcome を CSV (MQL5/Files) に保存
 input int    InpDiagEvery       = 0;       // N本ごとに診断 Print (0=off)
 
