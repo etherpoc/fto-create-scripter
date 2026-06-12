@@ -10,7 +10,13 @@
 - [x] v1 (基本): 5.5y 12 ペア replay → 全ペア合算 ほぼゼロ、Edge GONE
 - [x] v2 (+H4/H1 トレンドライン break skip): 全ペア合算 +0.27%/月、ROBUST portfolio で **P1 +0.44% / P2 +0.54%** ← ⭐
 - [x] v3 (+D1/W1 重要ライン近接 skip): v2 より微悪。ライン filter の寄与は小
-- [ ] **v2 を FTO で実戦検証 (ROBUST 4 ペア: CADJPY/EURJPY/EURUSD/USDCAD)**
+- [x] **スタンドアロン EA 作成** (`strategies/standalone/mtf_pullback_v2.js`)
+  - ユーザ判断でサーバ往復のラグを排除 → ロジックを EA に内包 (薄EA原則を意図的に上書き)
+  - 純粋ロジック (ZigZag/Dow/集計) は Python と **完全一致を実データ検証済** (`tools/verify_ea_port.mjs`)
+  - サイズ計算は口座通貨建てに正しく換算 (JPYクロス対応、time_of_day 全損の教訓)
+  - ログは fire-and-forget POST → `server/log_collector.py` → `data/fto_mtf_pb_v2_live/`
+- [ ] **v2 を FTO で実戦検証 (ROBUST 4 ペア: CADJPY/EURJPY/EURUSD/USDCAD)** ← EA 準備完了、実行待ち
+  - **M5 チャート**に貼る (ベース足 M5)。最初の数トレードで `risk$` ログが残高の約1%か目視確認
   - スプレッド込みでも月利 0.4%超 出るか
   - time_of_day のような壊滅にならないか (min_sl_dist_atr=0.3 で対策済)
 - [ ] WR を 50% 超に持っていく追加 filter 探索 (現状 49% でブレイクイーブン近辺)
