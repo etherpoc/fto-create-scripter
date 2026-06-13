@@ -128,7 +128,8 @@ void UpdateEquityBuffer()
    long day = (long)(TimeCurrent() / 86400);
    if(day == g_lastEqDay) return;
    g_lastEqDay = day;
-   double eq = AccountInfoDouble(ACCOUNT_EQUITY);
+   // 検証ロジックは realized(確定)エクイティ基準 → BALANCE(含み損益を含めない)。
+   double eq = AccountInfoDouble(ACCOUNT_BALANCE);
    int n = ArraySize(g_eqBuf);
    if(n < InpOvDays)
    {
@@ -150,7 +151,7 @@ double OverlayMult()
    if(n < MathMax(5, InpOvDays / 3)) return 1.0;
    double s = 0.0; for(int i = 0; i < n; i++) s += g_eqBuf[i];
    g_ovMA = s / n;
-   double eq = AccountInfoDouble(ACCOUNT_EQUITY);
+   double eq = AccountInfoDouble(ACCOUNT_BALANCE);   // realized 基準(検証ロジックと一致)
    return (eq < g_ovMA) ? InpOvMult : 1.0;
 }
 
@@ -297,7 +298,7 @@ void OpenPos(int side, double atr, double ovMult)
    PrintFormat("[bo_h1] ENTRY %s %s price=%.5f sl=%.5f lot=%.2f risk%s=%.2f 実損≈%.2f (bal=%.2f) atr=%.5f overlay=x%.1f(eq=%.0f MA=%.0f)",
                (side==1?"long":"short"), _Symbol, fill, sl, lot,
                AccountInfoString(ACCOUNT_CURRENCY), riskAmt, realRisk, bal, atr,
-               ovMult, AccountInfoDouble(ACCOUNT_EQUITY), g_ovMA);
+               ovMult, AccountInfoDouble(ACCOUNT_BALANCE), g_ovMA);
    if(g_csv != INVALID_HANDLE)
    {
       FileWrite(g_csv, "entry", TimeToString(g_eTime, TIME_DATE|TIME_MINUTES),
