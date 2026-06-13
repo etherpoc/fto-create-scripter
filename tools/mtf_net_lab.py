@@ -141,6 +141,18 @@ def variant_sets(name):
         return [(f"minSL{mn}", {**_BASE, "min_sl_dist_pips": mn}, False) for mn in (0, 15, 20, 25, 30)]
     if name == "room":
         return [(f"room_R<{rm}", {**_BASE, "room_R_max": rm}, False) for rm in (1.5, 2.0, 2.5, 3.0)]
+    if name == "qual":   # ★ entryロジック品質フィルタ(汎用性=viable拡大を狙う)
+        return [
+            ("production", _BASE, False),
+            ("+ER0.3", {**_BASE, "min_h1_er": 0.3}, False),
+            ("+ER0.4", {**_BASE, "min_h1_er": 0.4}, False),
+            ("+ER0.5", {**_BASE, "min_h1_er": 0.5}, False),
+            ("+impulse1.0", {**_BASE, "require_impulse": True, "impulse_atr": 1.0}, False),
+            ("+confluence1.5", {**_BASE, "require_h1_confluence": True, "confluence_atr": 1.5}, False),
+            ("+m15_unupdated", {**_BASE, "require_m15_unupdated_extreme": True}, False),
+            ("+ER0.4+impulse1.0", {**_BASE, "min_h1_er": 0.4, "require_impulse": True, "impulse_atr": 1.0}, False),
+            ("+ER0.4 +overlay", {**_BASE, "min_h1_er": 0.4}, True),
+        ]
     return [("production", _BASE, False)]
 
 
@@ -180,6 +192,15 @@ def main():
     print("=" * 116)
     if args.set == "detail":
         detail(); return
+    if args.set == "errr":
+        JPY3 = ["USDJPY", "GBPJPY", "EURJPY"]
+        print("\n--- ER×RR on JPY3 (ERでWR↑→高RRで利益回収できるか) ---")
+        for er in (0.0, 0.4):
+            for rr in (1.5, 2.0, 2.5):
+                ov = {**_BASE, "tp_rr": rr}
+                if er > 0: ov["min_h1_er"] = er
+                show(f"ER{er} RR{rr} +ov", ov, True, JPY3)
+        return
     if args.set == "jpy3":
         JPY3 = ["USDJPY", "GBPJPY", "EURJPY"]
         R3 = ["USDJPY", "EURJPY", "EURUSD"]
@@ -189,9 +210,20 @@ def main():
         show("JPY3 production +overlay", _BASE, True, JPY3)
         show("JPY3 strict-align(h4h1m15)", STRICT, False, JPY3)
         show("JPY3 strict-align +overlay", STRICT, True, JPY3)
+        ER = {**_BASE, "min_h1_er": 0.4}
+        print("\n  -- JPY3 に ER0.4(トレンド品質)を足す --")
+        show("JPY3 +ER0.4", ER, False, JPY3)
+        show("JPY3 +ER0.4 +overlay", ER, True, JPY3)
         print("\n--- [pythonNet robust3 = USDJPY/EURJPY/EURUSD] ---")
         show("R3 production", _BASE, False, R3)
-        show("R3 production +overlay", _BASE, True, R3)
+        show("R3 +ER0.4 +overlay", {**_BASE, "min_h1_er": 0.4}, True, R3)
+        # ER0.4 の全12 per-pair 安定性
+        print("\n■ ER0.4 per-pair net %/月 (viable顔ぶれの安定性確認)")
+        pp = _pp({**_BASE, "min_h1_er": 0.4})
+        for p in sorted(ALL, key=lambda x: -(pp[x][2] + pp[x][3])):
+            n, wr, m1, m2 = pp[p]
+            mk = "★" if (m1 > 0 and m2 > 0) else ("△" if (m1 > 0 or m2 > 0) else " ")
+            print(f"    {mk} {p:<7} N{n:>3} WR{wr:>4.0f}% P1{m1:>+5.2f}/P2{m2:>+5.2f}")
         return
     sets = ["overlay", "rr", "align", "minsl", "room"] if args.set == "all" else [args.set]
     for s in sets:

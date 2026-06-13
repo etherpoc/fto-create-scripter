@@ -1,4 +1,7 @@
-# Standalone EA — mtf_pullback v2
+# Standalone EA — mtf_pullback v2 ※**不採用(記録のみ)**
+
+> ⚠ **2026-06-14: mtf_pullback (MTF) は不採用。** 実Axiory 11年検証で OOS/IS 両方 net 負け。
+> 運用は breakout_h1 のみ([BREAKOUT_README](./BREAKOUT_README.md))。経緯は [MT5_README](./MT5_README.md)。本ファイルは記録として残置。
 
 サーバ非依存の **完全スタンドアロン FTO EA**。`strategies/mtf_pullback` の v2
 (`skip_on_trendline_break=True`) を丸ごと JavaScript に移植したもの。

@@ -124,6 +124,13 @@ class Params(StrategyParams):
     require_expanding_legs: bool = False
     # ★ タスク2: 1 つ上の時間足モード。H4=H1 一致 + M15 トレンド転換でエントリー、SL は H1 構造。
     htf_mode: bool = False
+    # ★ NEW: トレンド品質フィルタ = Kaufman 効率比(ER) on H1。
+    #   ER = |close[t]-close[t-N]| / Σ|close[i]-close[i-1]| (0..1, 高=綺麗なトレンド)。
+    #   平均回帰押し目はクリーンなトレンドでのみ機能する仮説 → ER>=閾値 のみエントリー。0=off。
+    min_h1_er: float = 0.0
+    er_period: int = 10        # ER の H1 本数
+    # ★ NEW: トレンド方向 ER のみ要求 (ER は方向不問だが、進行方向に効率的か net displacement の符号で確認)
+    er_directional: bool = True
 
 
 def _dow_trend(pivots: list[Pivot]) -> Optional[str]:
@@ -495,6 +502,26 @@ class MtfPullbackStrategy(Strategy):
             med = srt[len(srt) // 2]
             if med > 0 and atr_val > p.max_atr_ratio * med:
                 return
+
+        # ★ NEW: トレンド品質 = Kaufman 効率比(ER) on H1。クリーンなトレンドのみ押し目を取る。
+        if p.min_h1_er > 0:
+            h1c = [b.close for b in self.zz_h1.bars]
+            if len(h1c) < p.er_period + 1:
+                return
+            seg = h1c[-(p.er_period + 1):]
+            net = seg[-1] - seg[0]
+            vol = sum(abs(seg[i] - seg[i - 1]) for i in range(1, len(seg)))
+            if vol <= 0:
+                return
+            er = abs(net) / vol
+            if er < p.min_h1_er:
+                return
+            # 進行方向に効率的か (up は net>0, down は net<0)
+            if p.er_directional:
+                if major_dir == "up" and net <= 0:
+                    return
+                if major_dir == "down" and net >= 0:
+                    return
 
         # ①コンフルエンス: 押し目の安値/高値が直近 H1 スイング(支持/抵抗)に到達しているか
         if p.require_h1_confluence:

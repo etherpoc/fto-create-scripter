@@ -872,6 +872,44 @@ DD低下を実機確認してから risk% を上げて再レバ(順序厳守=過
 
 ---
 
+## G: 実Axioryデータ(11年)導入 → breakout真OOS検証・MTF不採用・7ペアへ更新 (2026-06-14)
+
+ユーザがAxiory公開ヒストリカル(M1 OHLCV, 2015-2026, 15ペア)をDL→ `data/axiory/` 展開(gitignore)。
+**実ブローカー(=デプロイ先)のM1・11年・2015-20が真の未知データ** → 本物のWF-OOSが可能に。
+ローダ `tools/axiory_data.py`(M1→M5/M15/H1/H4集計+npz, bo_fastと同I/F)。詳細 [[axiory-real-data]]。
+
+### 1. ★ breakout は実データ・真OOSで生存(最強の検証)
+`tools/axiory_validate.py`: breakout long-only を実Axiory 11年、OOS=2015-20/IS=2021-26 で検証。
+- **デプロイ5ペア全てOOS+IS両期間+**。XAUUSDが両期間最強。「2021-22円安の産物では」の懸念に、別レジームの
+  2015-20でも黒字という答え。**ただしレジーム依存(IS≈OOSの約2.4倍)** = 強トレンド期に大・平時に小。
+- 全15ペアスキャン: **robust(両期間+)=7ペア**(現5 + **CHFJPY/NZDJPY**)。USD系/EURGBPは2015-20○→2021-26で死亡
+  = **稼ぐペアはレジームで移動する**(トレンド機序は普遍だがペア選択は固定し過ぎない)。
+
+### 2. ★ 採用ペアを 5→7 に更新(CHFJPY/NZDJPY追加)
+`tools/axiory_basket.py`: BO5 vs BO7 を overlay入り・DD10%スケールで比較。
+- **効率(sumR/DD) 18.9→23.7、OOS +0.84→+1.24%/月、IS +2.01→+2.32%/月**。明確に改善 → **7ペア採用**。
+- BREAKOUT_README/README/CLAUDE 更新。EAコードは _Symbol 単位(ペア非ハードコード)なのでチャート追加のみ。
+
+### 3. ★ MTF(mtf_pullback/JPY3) を不採用に(実データが覆した)
+`tools/axiory_mtf.py`: MTFをAxiory M5で回し breakout との合算を実測。
+- **MTF JPY3 は OOS・IS 両方で net 負け**(FTO録音では微益)。実コストで薄い平均回帰エッジが消滅([[sweep-reversal-no-edge]]
+  系)。breakout相関 +0.12、合算効率 18.5→13.5 **悪化** → **併用の価値なし=不採用**。
+- README/MT5_README/CLAUDE から運用推奨を削除し**不採用ログ化**(コードは残置)。FTO時代の「両方が正解」は
+  **FTOデータの産物**で実データが覆した。**無相関ヘッジは現状不在**、候補は価格外データ(金利差)のみ。
+
+### 4. エクイティ曲線の直視で誤りを訂正(重要)
+MT5単体テスト(USDJPY 2016-26)の**推移CSV**を精査: ①2016-2020はトレード皆無(データが2020から)=「OOS」評価は
+誤りだった(訂正)。②+28%は**2021-22に集中、2023-26は横ばい**=レジーム依存が実曲線で可視化。
+→ **サマリー(PF/DD)だけで判断せず曲線を見る**。実Axiory導入の動機。
+
+### この日の教訓
+- **実ブローカー・実データ・真OOSが唯一の最終判定。** breakoutは生存(本物)、MTFは脱落、ペアは7へ。
+- **良いデータは“勝てる保証”でなく“正しい判定”**。FTO由来の結論(JPY3併用)が実データで複数覆った。
+
+成果物: `tools/axiory_data.py` / `axiory_validate.py` / `axiory_mtf.py` / `axiory_basket.py`。
+
+---
+
 ## 関連: 次にやること
 
 [NEXT_TASKS.md](./NEXT_TASKS.md) 参照。
