@@ -40,6 +40,7 @@ input int    InpMagic      = 220612;   // Magic Number
 input double InpMaxLot     = 50.0;     // Max Lot (safety cap)
 input double InpMaxTotalRiskPct = 3.0; // Fintokei: 同時保有リスク上限% (0=off)。超える新規はスキップ
 input bool   InpLongOnly   = true;     // long-only (推奨true。falseでshortも)
+input bool   InpShortOnly  = false;    // ★short-only(true=ショート専用インスタンス。スリーブ運用用)
 input bool   InpCsvLog     = true;     // entry/exit を CSV (MQL5/Files) に保存
 //--- エクイティカーブ・デリスク(overlay): 口座エクイティが暦日MAを割ったら新規ロット半減
 //    研究E章で検証。BO basket DD 32→20%(全年一貫)・シャッフル対照で本物(連続DD捉え)と確認。
@@ -73,9 +74,10 @@ int OnInit()
       if(g_csv != INVALID_HANDLE)
          FileWrite(g_csv, "type","time","side","price","sl","lot","risk_amt","balance","atr");
    }
-   PrintFormat("[bo_h1] init sym=%s ccy=%s en=%d ex=%d atr=%d SL=%.1f SMA=%d risk%%=%.2f longonly=%s",
+   PrintFormat("[bo_h1] init sym=%s ccy=%s en=%d ex=%d atr=%d SL=%.1f SMA=%d risk%%=%.2f dir=%s",
                _Symbol, AccountInfoString(ACCOUNT_CURRENCY), InpEntryN, InpExitN, InpAtrN,
-               InpSlAtr, InpSmaN, InpRiskPct, (InpLongOnly?"true":"false"));
+               InpSlAtr, InpSmaN, InpRiskPct,
+               (InpShortOnly?"SHORT-only":(InpLongOnly?"LONG-only":"both")));
    return INIT_SUCCEEDED;
 }
 
@@ -256,8 +258,9 @@ void OnTick()
    double bh1 = iHigh(_Symbol, TF, 1), bl1 = iLow(_Symbol, TF, 1), bc1 = iClose(_Symbol, TF, 1);
    double dhi = DonchHigh(InpEntryN), dlo = DonchLow(InpEntryN);
    double sma = SmaPrev(InpSmaN);
-   bool longOK  = (bh1 > dhi) && (InpSmaN == 0 || bc1 > sma);
-   bool shortOK = (!InpLongOnly) && (bl1 < dlo) && (InpSmaN == 0 || bc1 < sma);
+   // InpShortOnly=true → ショートのみ / InpLongOnly=true(既定) → ロングのみ / 両false → 両建て
+   bool longOK  = (bh1 > dhi) && (InpSmaN == 0 || bc1 > sma) && !InpShortOnly;
+   bool shortOK = (bl1 < dlo) && (InpSmaN == 0 || bc1 < sma) && (InpShortOnly || !InpLongOnly);
 
    double ovMult = OverlayMult();
    if(longOK)       OpenPos(1, atr, ovMult);
