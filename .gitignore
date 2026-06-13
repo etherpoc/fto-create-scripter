@@ -49,3 +49,5 @@ server/certs/*.pem
 # ログ
 *.log
 data/cache/
+data/axiory/
+data/axiory_cache/
