@@ -41,12 +41,22 @@ input double InpMaxLot     = 50.0;     // Max Lot (safety cap)
 input double InpMaxTotalRiskPct = 3.0; // Fintokei: 同時保有リスク上限% (0=off)。超える新規はスキップ
 input bool   InpLongOnly   = true;     // long-only (推奨true。falseでshortも)
 input bool   InpCsvLog     = true;     // entry/exit を CSV (MQL5/Files) に保存
+//--- エクイティカーブ・デリスク(overlay): 口座エクイティが暦日MAを割ったら新規ロット半減
+//    研究E章で検証。BO basket DD 32→20%(全年一貫)・シャッフル対照で本物(連続DD捉え)と確認。
+//    口座エクイティ基準=全EA共有=バスケットレベルで機能。スケール不変。1枚運用でも口座全体で効く。
+input bool   InpOverlay    = true;     // overlay 有効(口座エクイティ<MAで新規ロット×InpOvMult)
+input int    InpOvDays     = 60;       // overlay: 口座エクイティMAの日数(検証値60)
+input double InpOvMult     = 0.5;      // overlay: MA割れ時のロット倍率(検証値0.5)
 
 #define TF PERIOD_H1
 
 CTrade   g_trade;
 datetime g_lastBar = 0;
 int      g_csv = INVALID_HANDLE;
+//--- overlay 用: 日次口座エクイティのバッファ(過去 InpOvDays 日)
+double   g_eqBuf[];
+long     g_lastEqDay = -1;
+double   g_ovMA = 0.0;
 // 直近エントリー記録(outcomeログ用)
 bool     g_eValid=false; int g_eSide=0; double g_eEntry=0,g_eSL=0,g_eLot=0; datetime g_eTime=0;
 
@@ -112,6 +122,39 @@ double AtrPrev(int n)
 }
 
 //+------------------------------------------------------------------+
+// overlay: 新しい暦日ごとに口座エクイティを1点サンプルし過去 InpOvDays 日を保持
+void UpdateEquityBuffer()
+{
+   long day = (long)(TimeCurrent() / 86400);
+   if(day == g_lastEqDay) return;
+   g_lastEqDay = day;
+   double eq = AccountInfoDouble(ACCOUNT_EQUITY);
+   int n = ArraySize(g_eqBuf);
+   if(n < InpOvDays)
+   {
+      ArrayResize(g_eqBuf, n + 1);
+      g_eqBuf[n] = eq;
+   }
+   else
+   {
+      for(int i = 0; i < n - 1; i++) g_eqBuf[i] = g_eqBuf[i + 1];  // shift left
+      g_eqBuf[n - 1] = eq;
+   }
+}
+// overlay 倍率: 口座エクイティが直近 InpOvDays 日MAを割れば InpOvMult、否なら 1.0。
+// スケール不変(eq も MA も同率)。ウォームアップ不足時は通常サイズ。
+double OverlayMult()
+{
+   if(!InpOverlay) return 1.0;
+   int n = ArraySize(g_eqBuf);
+   if(n < MathMax(5, InpOvDays / 3)) return 1.0;
+   double s = 0.0; for(int i = 0; i < n; i++) s += g_eqBuf[i];
+   g_ovMA = s / n;
+   double eq = AccountInfoDouble(ACCOUNT_EQUITY);
+   return (eq < g_ovMA) ? InpOvMult : 1.0;
+}
+
+//+------------------------------------------------------------------+
 // Fintokei: 口座全体の「保有中ポジションのSL基準リスク合計%」(全シンボル・全magic・手動含む)
 double AccountOpenRiskPct()
 {
@@ -151,10 +194,10 @@ bool HasPosition(int &side)
 
 // SL距離あたりの 1lot 損失を OrderCalcProfit で正確に計算(通貨換算を全自動)。
 // SYMBOL_TRADE_TICK_VALUE はゴールド×非USD口座等で誤値を返すため信用しない。
-double RiskLot(int side, double entry, double sl, double &riskAmt, double &bal, double &moneyPerLot)
+double RiskLot(int side, double entry, double sl, double ovMult, double &riskAmt, double &bal, double &moneyPerLot)
 {
    bal = AccountInfoDouble(ACCOUNT_BALANCE);
-   riskAmt = bal * (InpRiskPct / 100.0);
+   riskAmt = bal * (InpRiskPct / 100.0) * ovMult;   // overlay でリスクを縮小
    moneyPerLot = 0.0;
    if(bal <= 0) return 0.0;
    double slDist = MathAbs(entry - sl);
@@ -182,6 +225,7 @@ void OnTick()
    datetime t0 = iTime(_Symbol, TF, 0);
    if(t0 <= 0 || t0 == g_lastBar) return;   // 新しい確定足のみ処理
    g_lastBar = t0;
+   UpdateEquityBuffer();   // overlay: 日次口座エクイティを更新
    if(Bars(_Symbol, TF) < InpEntryN + InpAtrN + InpSmaN + 5) return;  // ウォームアップ
 
    double atr = AtrPrev(InpAtrN);
@@ -214,12 +258,13 @@ void OnTick()
    bool longOK  = (bh1 > dhi) && (InpSmaN == 0 || bc1 > sma);
    bool shortOK = (!InpLongOnly) && (bl1 < dlo) && (InpSmaN == 0 || bc1 < sma);
 
-   if(longOK)       OpenPos(1, atr);
-   else if(shortOK) OpenPos(-1, atr);
+   double ovMult = OverlayMult();
+   if(longOK)       OpenPos(1, atr, ovMult);
+   else if(shortOK) OpenPos(-1, atr, ovMult);
 }
 
 //+------------------------------------------------------------------+
-void OpenPos(int side, double atr)
+void OpenPos(int side, double atr, double ovMult)
 {
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
@@ -228,7 +273,7 @@ void OpenPos(int side, double atr)
    double sl = (side == 1) ? price - slDist : price + slDist;
    sl = NormalizeDouble(sl, _Digits);
    double riskAmt, bal, moneyPerLot;
-   double lot = RiskLot(side, price, sl, riskAmt, bal, moneyPerLot);
+   double lot = RiskLot(side, price, sl, ovMult, riskAmt, bal, moneyPerLot);
    if(lot <= 0){ PrintFormat("[bo_h1] skip size slDist=%.5f", slDist); return; }
    // サイズ検証: この lot の実損(口座通貨)が risk% 近傍か
    double realRisk = lot * moneyPerLot;
@@ -249,9 +294,10 @@ void OpenPos(int side, double atr)
    if(!ok){ PrintFormat("[bo_h1] ORDER FAIL ret=%d %s", g_trade.ResultRetcode(), g_trade.ResultRetcodeDescription()); return; }
    double fill = g_trade.ResultPrice(); if(fill <= 0) fill = price;
    g_eValid=true; g_eSide=side; g_eEntry=fill; g_eSL=sl; g_eLot=lot; g_eTime=iTime(_Symbol,TF,0);
-   PrintFormat("[bo_h1] ENTRY %s %s price=%.5f sl=%.5f lot=%.2f risk%s=%.2f 実損≈%.2f (bal=%.2f) atr=%.5f",
+   PrintFormat("[bo_h1] ENTRY %s %s price=%.5f sl=%.5f lot=%.2f risk%s=%.2f 実損≈%.2f (bal=%.2f) atr=%.5f overlay=x%.1f(eq=%.0f MA=%.0f)",
                (side==1?"long":"short"), _Symbol, fill, sl, lot,
-               AccountInfoString(ACCOUNT_CURRENCY), riskAmt, realRisk, bal, atr);
+               AccountInfoString(ACCOUNT_CURRENCY), riskAmt, realRisk, bal, atr,
+               ovMult, AccountInfoDouble(ACCOUNT_EQUITY), g_ovMA);
    if(g_csv != INVALID_HANDLE)
    {
       FileWrite(g_csv, "entry", TimeToString(g_eTime, TIME_DATE|TIME_MINUTES),
