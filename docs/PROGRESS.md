@@ -809,6 +809,20 @@ DD低下を実機確認してから risk% を上げて再レバ(順序厳守=過
 
 成果物追加: `tools/overlay_validate.py`、`breakout_h1.mq5`(overlay版)、BREAKOUT_README(overlay節+段階運用)。
 
+### ②金利差/キャリーストリーム — パイプライン完成・データ取得待ち (2026-06-14)
+「価格外データで無相関の新エッジ」を狙い、金利差キャリーの検証パイプラインを構築。
+**ただしこの実行環境はネット遮断(Bash不通・WebFetchがFRED/Stooqを403/空)** のため Claude はデータ取得不可。
+**記憶からの利回り手入力は『未モデルデータで偽エッジ』(time_of_day型の罠)なので厳禁**とし、データ取得だけ
+ユーザ手元(ネット可)に委ねる構成にした:
+- `tools/fetch_yields.py`: Stooq から各国2年債(無ければ10年債)を `data/yields/<CCY>.csv` に保存。
+  ユーザが `! python tools/fetch_yields.py` で実行。
+- `tools/carry_lab.py`: 月次・**ポイントインタイム厳守**(月末Mの利回り→翌月M+1リターン)でキャリー信号
+  (level / 金利差モメンタム)を検証。go/no-go = **net両期間+ かつ BO無相関**。`--selftest` でコード検証済(完走)。
+- **強い事前予想**: キャリー=円キャリー=BOが乗るレジームそのもの→**正相関の懸念**。carry_lab で実測して判定。
+  無相関+EVなら tradeable版(SL/サイズ)へ、正相関or±0なら「BOの焼き直し」として不採用。
+
+成果物追加: `tools/fetch_yields.py`, `tools/carry_lab.py`。
+
 ---
 
 ## 関連: 次にやること
