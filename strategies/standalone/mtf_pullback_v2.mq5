@@ -46,6 +46,11 @@ input int    InpServerUtcOffset = -3;      // 手動Server->UTC offset (AutoがO
 input double InpMinSlPips        = 20.0;    // 絶対最小SL pips (タイトSL=コスト負け除外, 0=off, 確定値20)
 input bool   InpCsvLog          = true;    // entry/outcome を CSV (MQL5/Files) に保存
 input int    InpDiagEvery       = 0;       // N本ごとに診断 Print (0=off)
+//--- エクイティカーブ・デリスク(overlay): 口座残高(realized)が暦日MAを割ったら新規ロット×InpOvMult
+//    研究E章で検証(breakoutと同一の口座レベル汎用ロジック)。DD削減=ペア構成に依らず効く改善層。
+input bool   InpOverlay          = true;    // overlay 有効(口座残高<MAで新規ロット半減)
+input int    InpOvDays           = 60;      // overlay: 口座残高MAの日数(検証値60)
+input double InpOvMult           = 0.5;     // overlay: MA割れ時のロット倍率(検証値0.5)
 
 //============================ 戦略定数 (Python Params 既定と一致) ======
 #define ZZ_DEPTH_M5   5
@@ -258,6 +263,10 @@ CZigZag *g_zzH4  = NULL;
 datetime g_lastBar    = 0;
 datetime g_lastM5Fed  = 0;
 datetime g_lastM15Fed = 0;
+//--- overlay 用: 日次口座残高(realized)のバッファ(過去 InpOvDays 日)
+double   g_eqBuf[];
+long     g_lastEqDay = -1;
+double   g_ovMA = 0.0;
 datetime g_lastM30Fed = 0;
 datetime g_lastH1Fed  = 0;
 datetime g_lastH4Fed  = 0;
@@ -365,7 +374,31 @@ void OnTick()
    if(t0 <= 0) return;
    if(t0 == g_lastBar) return;     // 同じ進行中バー
    g_lastBar = t0;
+   UpdateEquityBuffer();           // overlay: 日次口座残高を更新
    OnNewM5Bar();
+}
+
+//+------------------------------------------------------------------+
+// overlay: 新しい暦日ごとに口座残高(realized)を1点サンプルし過去 InpOvDays 日を保持
+void UpdateEquityBuffer()
+{
+   long day = (long)(TimeCurrent() / 86400);
+   if(day == g_lastEqDay) return;
+   g_lastEqDay = day;
+   double eq = AccountInfoDouble(ACCOUNT_BALANCE);   // realized 基準(検証ロジックと一致)
+   int n = ArraySize(g_eqBuf);
+   if(n < InpOvDays) { ArrayResize(g_eqBuf, n + 1); g_eqBuf[n] = eq; }
+   else { for(int i = 0; i < n - 1; i++) g_eqBuf[i] = g_eqBuf[i + 1]; g_eqBuf[n - 1] = eq; }
+}
+// overlay 倍率: 口座残高が直近 InpOvDays 日MAを割れば InpOvMult、否なら 1.0。スケール不変。
+double OverlayMult()
+{
+   if(!InpOverlay) return 1.0;
+   int n = ArraySize(g_eqBuf);
+   if(n < MathMax(5, InpOvDays / 3)) return 1.0;
+   double s = 0.0; for(int i = 0; i < n; i++) s += g_eqBuf[i];
+   g_ovMA = s / n;
+   return (AccountInfoDouble(ACCOUNT_BALANCE) < g_ovMA) ? InpOvMult : 1.0;
 }
 
 //+------------------------------------------------------------------+
@@ -595,8 +628,9 @@ void OnNewM5Bar()
    }
 
    // ---- サイズ (tick value で口座通貨建てに正確逆算) ----
+   double ovMult = OverlayMult();
    double riskAmt, balance;
-   double lot = RiskLot(slDist, riskAmt, balance);
+   double lot = RiskLot(slDist, ovMult, riskAmt, balance);
    if(lot <= 0)
    {
       if(InpDiagEvery>0) PrintFormat("[mtfpb] skip_size slDist=%.5f", slDist);
@@ -636,8 +670,8 @@ void OnNewM5Bar()
    g_eValid=true; g_eSide=side; g_eEntry=price; g_eSL=nSL; g_eTP=nTP;
    g_eSLdist=slDist; g_eLot=lot; g_eTime=t1;
 
-   PrintFormat("[mtfpb] ENTRY %s %s price=%.5f sl=%.5f tp=%.5f lot=%.2f risk$=%.2f (bal=%.2f) atr=%.5f",
-               (side==1?"long":"short"), _Symbol, price, nSL, nTP, lot, riskAmt, balance, atr);
+   PrintFormat("[mtfpb] ENTRY %s %s price=%.5f sl=%.5f tp=%.5f lot=%.2f risk$=%.2f (bal=%.2f) atr=%.5f overlay=x%.1f(MA=%.0f)",
+               (side==1?"long":"short"), _Symbol, price, nSL, nTP, lot, riskAmt, balance, atr, ovMult, g_ovMA);
 
    if(g_csv!=INVALID_HANDLE)
    {
@@ -652,10 +686,10 @@ void OnNewM5Bar()
 //| 口座 risk% を sl_dist で逆算。tick value(口座通貨) を使うので正確。   |
 //|  return: lot (0=不可)。riskAmt/balance を out で返す。              |
 //+------------------------------------------------------------------+
-double RiskLot(double slDist, double &riskAmt, double &balance)
+double RiskLot(double slDist, double ovMult, double &riskAmt, double &balance)
 {
    balance = AccountInfoDouble(ACCOUNT_BALANCE);
-   riskAmt = balance * (InpRiskPct / 100.0);
+   riskAmt = balance * (InpRiskPct / 100.0) * ovMult;   // overlay でリスクを縮小
    if(balance<=0 || slDist<=0 || riskAmt<=0) return 0.0;
 
    double tickVal  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE); // 1tick/1lot の口座通貨価値

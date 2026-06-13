@@ -844,6 +844,34 @@ DD低下を実機確認してから risk% を上げて再レバ(順序厳守=過
 
 ---
 
+## F: mtf_pullback の net 再検証 + overlay 移植 (2026-06-14)
+
+「MTFの精度向上と汎用化」要望に対し、主要レバーを **net・全12ペア・WF** で測り直した(過去の多くは gross)。
+`tools/mtf_net_lab.py`。
+
+### 汎用化は構造的に不可(データが拒否)
+- **全12ペア均等は net 負け**(-1〜-14%/年)。viable は実質 **3ペア(EURJPY/EURUSD/USDJPY)** のみ。
+- RR↑(1.5→2.5)は viable を減らす(3→1, WR42.9→30.9%)。align/minSL/room でも viable は増えず。
+- = **平均回帰エッジは本質的に narrow**(純粋ダウ/LSR がコインフリップだった系譜と一致)。「同一パラメータ・
+  選択的デプロイ」が現実。EURUSD は Python net では★だが MT5実機(Axiory)で-3.5%失敗 → 実機を信じ JPY3 維持。
+
+### ★ 真の改善 = overlay(口座レベル=ペア非依存の汎用改善層)
+デプロイ JPY3(USDJPY/GBPJPY/EURJPY) net WF:
+| | WR | P1/P2 | DD | MAR |
+|---|---|---|---|---|
+| production | 50.9% | +0.48/+0.71%/月 | 15.9% | 2.4 |
+| **production +overlay** | 50.9% | +0.40/+0.79 | **11.2%** | **3.4** |
+- **DD -30% / MAR +42% / リターン維持**。breakout と同じ overlay を `mtf_pullback_v2.mq5` に移植(残高基準で一致)。
+
+### 学び: 全12 と 実デプロイで最適 align が逆
+- 全12では厳格 align(h4,h1,m15)が WR↑/DD半減で良く見えたが、**JPY3 実デプロイでは頻度減(39→14/年)で
+  MAR が逆に低下(3.4→2.3)**。**entry は変えず production(h1,m15)+overlay が最良**。集約指標で判断せず
+  実デプロイ単位で確かめる重要性(gross→net, 全12→JPY3 と二度同じ教訓)。
+
+成果物追加: `tools/mtf_net_lab.py`、`mtf_pullback_v2.mq5`(overlay版)、MT5_README(overlay節)。
+
+---
+
 ## 関連: 次にやること
 
 [NEXT_TASKS.md](./NEXT_TASKS.md) 参照。

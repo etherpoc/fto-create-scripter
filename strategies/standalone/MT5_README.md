@@ -56,6 +56,22 @@ FTO 版 `mtf_pullback_v2.js` を **MQL5 に忠実移植**した MetaTrader5 用 
 - 最初のエントリー `[mtfpb] ENTRY ... risk$=...` で **risk$ が残高の約0.5%** か必ず目視。
 - `InpCsvLog=true` で `MQL5/Files`(テスターは Tester 配下)に entry/outcome の CSV を保存。
 
+### ★ エクイティカーブ・デリスク overlay (`InpOverlay`, 既定 true)
+
+研究E章(2026-06-14)で検証した DD 削減層。**口座残高(realized)が直近 `InpOvDays`(既定60)日MAを
+割ったら新規ロットを `InpOvMult`(既定0.5)倍**にする。**口座レベル=ペア構成に依らず効く汎用的な改善**
+(breakout_h1 と同一ロジック・残高基準で一致)。entryロジック(エントリー/SL/TP)は不変。
+
+JPY3 net 検証(全期間 WF, 1R=1%/pair):
+| | WR | P1/P2 net | maxDD | MAR |
+|---|---|---|---|---|
+| production(overlay無) | 50.9% | +0.48/+0.71%/月 | 15.9% | 2.4 |
+| **production +overlay** | 50.9% | +0.40/**+0.79**%/月 | **11.2%** | **3.4** |
+
+→ **DD -30% / MAR +42% / リターン維持**。デプロイ(0.5%/pair)では合成DDが約8%→~5.6%級に低下。
+- entry ログに `overlay=x0.5(MA=...)` が出る。`残高 < MA` の局面で x0.5 か目視。`InpOverlay=false` で従来挙動。
+- 注: **align は変えない**(厳格h4h1m15は全12では良く見えるが、JPY3 実デプロイでは頻度減でMAR低下。production h1+m15 が最良)。
+
 ### Fintokei: 同時保有リスク上限 (`InpMaxTotalRiskPct`, 既定3.0)
 
 プロップの「同時に持てるリスク 3% まで」ルール用。新規エントリー時に **口座全体(全シンボル・
