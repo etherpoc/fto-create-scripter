@@ -190,6 +190,10 @@ EA は 1 つだけ (`strategies/thin_client/fto_strategy.js`)。判断ロジッ�
 - **`strategies/standalone/BREAKOUT_README.md`** — MT5 用 EA (`breakout_h1.mq5`) の運用ドキュメント。
   ★現状の最高到達点。H1 long-only ブレイクアウト 5ペア(XAU/USDJPY/EURJPY/AUDJPY/GBPJPY,
   risk0.5%/pair)。実機補正で月+2.62%/合成DD9.4%。
+- **`framework/README.md`** — ★マルチプラットフォーム EA 開発基盤 (PropKit) の説明。
+  `breakout_h1` を MT5/MT4/cTrader へ展開し、Fintokei/FTMO/通常口座を実行時 input で切替。
+  `config/profiles.yaml`(真実の源)→`tools/gen_profiles.py`(自動生成)→`tools/deploy.ps1`(配備)の使い方、
+  各プラットフォームの罠(MT4サイズ/cTrader永続化/ニュース)と検証状態を記載。
 
 ### Claude が守る運用ルール
 

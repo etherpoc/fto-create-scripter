@@ -8,3 +8,6 @@
 # pandas
 # numpy
 # matplotlib
+
+# tools/gen_profiles.py（config/profiles.yaml → 各言語 Profiles.* 生成）が使用。
+PyYAML

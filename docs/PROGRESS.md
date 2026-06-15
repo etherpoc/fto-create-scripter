@@ -1019,6 +1019,34 @@ USD系 M5 zフェードは全構成・全ペアで巨大net負け(合算OOS-1366
 
 ---
 
+## J: マルチプラットフォーム EA 開発基盤 (PropKit) — MT5/MT4/cTrader (2026-06-14)
+
+採用戦略 `breakout_h1` を MT5 だけでなく **MT4・cTrader** にも展開でき、**Fintokei/FTMO/通常口座**を
+**実行時 input で切替**できる開発基盤を構築。詳細は [`framework/README.md`](../framework/README.md)。
+
+### 設計（ユーザ確認済みの3決定）
+- **共有設定 + 各言語フレームワーク**方式。`config/profiles.yaml` を**唯一の真実の源**にし、
+  `tools/gen_profiles.py` で各言語の `Profiles.*`(mqh/mqh/cs)を**自動生成**。
+- 共通機構(確定足・サイジング・overlay・プロップガード・発注・ログ)を **PropKit** に集約
+  (`framework/{mql5,mql4,ctrader}/PropKit.{mqh,cs}`)。戦略は**判定ロジックのみ**。
+- **プロファイルは実行時 enum input**で選択(Fintokei/FTMO/Normal)。個別input(`-1`=維持)で上書き可。
+
+### 実装したガード(プロファイル駆動)
+- 日次/全体損失(basis別: Fintokei=equity / FTMO=開始時balance、現在equityと比較)。block / flatten+halt。
+- 同時保有リスク上限%(元 `InpMaxTotalRiskPct` を一般化)、FTMO 注文数上限、最小保有秒(反ティックスキャル)、
+  ニュース窓(手動CSV 全PF + MT5 MqlCalendar opt-in)。overlay(口座残高<60日MAで新規ロット半減)も移植。
+
+### 正直な限界(README に明記)
+- **MT4 はサイズが `MODE_TICKVALUE` 依存**(OrderCalcProfit 無し)→ 非USD口座×金で誤値の恐れ。**実機デモで実損目視必須**。
+- **cTrader は初期残高を起動時取得**(再起動で総損失ベースラインがリセット)→ LocalStorage 永続化は将来課題。
+- MT4/cTrader は **構造完成・ブローカー未検証**。MT5 は元 `breakout_h1.mq5` と Normal で A/B 一致検証可能。
+
+### 成果物
+- `config/profiles.yaml` / `tools/gen_profiles.py`(`--check`対応) / `tools/deploy.ps1`(配備+バンドル)
+- `framework/{mql5,mql4,ctrader}/` / `strategies/breakout_h1/{mql5.mq5,mql4.mq4,ctrader.cs}` / `framework/README.md`
+
+---
+
 ## 関連: 次にやること
 
 [NEXT_TASKS.md](./NEXT_TASKS.md) 参照。

@@ -1,0 +1,87 @@
+# =====================================================================
+#  config/profiles.yaml — プロップ・プロファイル定義（単一の真実の源）
+# =====================================================================
+#
+#  このファイルが Fintokei / FTMO / Normal の口座ルールの「唯一の真実の源」。
+#  ここを編集したら `python tools/gen_profiles.py` を実行して各言語の
+#  Profiles.* (framework/mql5, mql4, ctrader) を再生成すること。
+#  生成ファイルは手で編集しない（再生成で上書きされる）。
+#
+#  出典: C:\Users\ether\workspace\Stock-Dashboard\prop_rule.md (2026-06-14 時点)
+#  ⚠ 両社ともルール改定が頻繁。資金提供前に必ず公式FAQで最新値を確認すること。
+#
+#  フィールドのタグ:
+#    [GUARD] = EA が実際に強制するルール（発注ブロック/決済/サイズ制限）
+#    [INFO]  = 記録・将来用。現状ロジックには影響しない（ログ表示のみ）
+#
+#  ※ 戦略チューニング（Donchian長/SL/SMA/risk%/overlay 等）はプロファイルでは
+#    なく「戦略 input」側に置く。ここは口座ルール（プロップ制約）専用。
+# =====================================================================
+
+schema_version: 1
+
+profiles:
+
+  # -------------------------------------------------------------------
+  # Fintokei（チャレンジプラン）— AXIORY デモ環境
+  #   ルールが緩め。マーチン/ナンピン解禁・ニュース緩和・JPY建て対応。
+  # -------------------------------------------------------------------
+  FINTOKEI:
+    display_name: "Fintokei (Challenge)"
+    daily_loss_pct:           5.0          # [GUARD] 日次損失制限 -5%
+    daily_loss_basis:         equity       # [GUARD] 午前0時時点の有効証拠金(Equity)基準・含み損も対象
+    total_loss_pct:           10.0         # [GUARD] 全体損失制限 -10%
+    total_loss_basis:         initial_balance  # [GUARD] 初期残高基準
+    max_concurrent_risk_pct:  3.0          # [GUARD] 同時保有SL基準リスク上限%（既存 InpMaxTotalRiskPct）
+    news_filter:              "off"          # [GUARD] 概ね緩和・撤廃（要公式確認）
+    news_window_min:          0            # [INFO]
+    min_hold_seconds:         30           # [GUARD] ティックスキャル回避(目安10-30秒未満)→安全側で30
+    max_open_positions:       0            # [INFO] 公表上限なし（0=無制限）
+    max_orders_per_day:       0            # [INFO] 公表上限なし
+    max_strategy_usd:         0            # [INFO] 公表上限なし
+    on_daily_breach:          block            # [GUARD] 日次到達: 新規停止（その日）
+    on_total_breach:          flatten_and_halt # [GUARD] 全体到達: 自分の建玉を決済して停止
+    profit_target_pct:        10.0         # [INFO] STEP1 利益目標(クオーツは8%)
+
+  # -------------------------------------------------------------------
+  # FTMO（2-step Normal プラン）— OANDA 傘下
+  #   線引きが厳格・明確。通常口座はニュース±2分制約、注文数上限あり。
+  # -------------------------------------------------------------------
+  FTMO:
+    display_name: "FTMO (2-step Normal)"
+    daily_loss_pct:           5.0          # [GUARD] 日次損失制限 -5%
+    daily_loss_basis:         balance      # [GUARD] その日の開始時残高(Balance)基準
+    total_loss_pct:           10.0         # [GUARD] 有効証拠金が初期残高の90%未満で失格
+    total_loss_basis:         initial_balance
+    max_concurrent_risk_pct:  0.0          # [GUARD] FTMOは%上限なし（0=off）
+    news_filter:              window       # [GUARD] 主要指標前後2分の発注禁止（通常口座）
+    news_window_min:          2            # [GUARD] ±2分
+    min_hold_seconds:         15           # [GUARD] 高速・ティック操作目的の禁止（15秒以上保有）
+    max_open_positions:       200          # [GUARD] サーバ負荷: 同時約200注文の目安
+    max_orders_per_day:       2000         # [GUARD] 日2000オーダーの目安
+    max_strategy_usd:         400000       # [INFO] 1ストラテジー最大$40万（warnのみ）
+    on_daily_breach:          block
+    on_total_breach:          flatten_and_halt
+    profit_target_pct:        10.0
+
+  # -------------------------------------------------------------------
+  # Normal（実ライブ口座 / 制約なし）
+  #   プロップ・ガードは全て無効。戦略本来の挙動で走る。
+  #   ※ MT5 A/B 検証は NORMAL で行うと元 breakout_h1.mq5 と挙動一致する。
+  # -------------------------------------------------------------------
+  NORMAL:
+    display_name: "Normal (live / unconstrained)"
+    daily_loss_pct:           0.0          # [GUARD] off
+    daily_loss_basis:         balance
+    total_loss_pct:           0.0          # [GUARD] off
+    total_loss_basis:         initial_balance
+    max_concurrent_risk_pct:  0.0          # off
+    news_filter:              "off"
+    news_window_min:          0
+    min_hold_seconds:         0
+    max_open_positions:       0
+    max_orders_per_day:       0
+    max_strategy_usd:         0
+    on_daily_breach:          block
+    on_total_breach:          block
+    profit_target_pct:        0.0

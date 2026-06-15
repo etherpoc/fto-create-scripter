@@ -51,3 +51,6 @@ server/certs/*.pem
 data/cache/
 data/axiory/
 data/axiory_cache/
+
+# マルチプラットフォーム基盤の配備ビルド (tools/deploy.ps1 が生成、再現可能)
+build/

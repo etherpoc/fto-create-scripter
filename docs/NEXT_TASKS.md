@@ -5,6 +5,26 @@
 
 ---
 
+## ✅ 完了: マルチプラットフォーム基盤 (PropKit) 構築 (2026-06-14)
+
+詳細は PROGRESS.md「J章」/ [`framework/README.md`](../framework/README.md)。
+
+- [x] `config/profiles.yaml`(真実の源) + `tools/gen_profiles.py`(各言語 Profiles.* 自動生成, `--check`)。
+- [x] PropKit を MQL5/MQL4/cTrader で実装(確定足・サイズ・overlay・プロップガード・発注・ログ)。
+- [x] `breakout_h1` を3PFへ移植(判定のみ)。Fintokei/FTMO/Normal を実行時 input で切替。
+- [x] `tools/deploy.ps1`(配備 + MQL include インライン + C# using ホイストのバンドル)。
+
+### 🔵 残: 基盤の実機検証・拡張
+- [ ] **P1: MT5 A/B 検証** — 元 `breakout_h1.mq5` vs `strategies/breakout_h1/mql5.mq5` を Profile=Normal で
+  Strategy Tester 比較し、トレード数/時刻/lot/SL の一致を確認(CSV diff)。Fintokei で同時リスク3%スキップ再現。
+- [ ] **P1: MT4 サイズ実機検証** — デモで `実損≈残高×risk%` を目視(`MODE_TICKVALUE` の罠A)。非USD口座×金で特に。
+- [ ] **P1: cTrader 実機検証** — cTrader テスター/デモで entry/exit 足時刻が MT5 と一致するか、units サイズが risk% 通りか。
+- [ ] **P2: cTrader 総損失ベースラインの LocalStorage 永続化**(現状は起動時取得=再起動でリセット)。
+- [ ] **P2: ニュース自動回避の拡充** — MT4/cTrader 用に外部カレンダー CSV フィード(MT5 は MqlCalendar 済)。
+- [ ] **P3: short スリーブ / 他戦略を同基盤へ移植**(`InpShortOnly`・USDショート等)。
+
+---
+
 ## ✅ 完了: MT5移植 + net確定 + JPY3 basket (2026-06-12)
 
 詳細は PROGRESS.md「現状整理」/ IMPROVEMENT_RESULTS.md / strategies/standalone/MT5_README.md。
