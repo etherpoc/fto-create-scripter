@@ -185,6 +185,9 @@ EA は 1 つだけ (`strategies/thin_client/fto_strategy.js`)。判断ロジッ�
   完了したタスクは PROGRESS.md に要約を移すか ☑ で残す。
 - **`docs/IMPROVEMENT_RESULTS.md`** — mtf_pullback の勝率/利益向上ロジック改善の検証結果まとめ
   (アブレーション・各条件の効いた/効かなかった・現ベスト構成・過剰適合注記・netコスト評価・MT5実機検証)。
+- **`docs/VERIFICATION_METHOD.md`** — ★戦略検証の標準手順(数字を振り回さないための規約)。
+  証拠の信頼順位(実機>校正シミュ>理想BT)・約定モデルの明示・実測転移率での校正・3点セット報告・
+  DD10%サイジング。月利が検証ごとに振れた反省(2026-06-16)から制定。**成績を報告する前に必ず参照する。**
 - **`strategies/standalone/MT5_README.md`** — ⚠ **mtf_pullback (MTF/JPY3) 不採用の記録**。
   実Axiory 11年検証で OOS/IS 両方 net 負け → 不採用。運用は breakout_h1 のみ。経緯の log として残置。
 - **`strategies/standalone/BREAKOUT_README.md`** — MT5 用 EA (`breakout_h1.mq5`) の運用ドキュメント。
