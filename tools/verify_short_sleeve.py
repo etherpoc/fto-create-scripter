@@ -129,10 +129,56 @@ def stop_trades(t, o, h, l, c, direction, slip_pips, ps):
     return trades
 
 
+def honest_stop_trades(t, o, h, l, c, direction, slip_pips, ps):
+    """先読みなしの逆指値版。フィルタは『手前の確定足 c[i-1] vs SMA』のみ(当足終値は使わない)。
+    レベル到達でintrabar約定 = ダマシ(ヒゲ抜け戻り)も拾う。EAを逆指値発注に変えた場合の正直な姿。"""
+    en, ex, an, sl_atr, sma_n = P["entry_n"], P["exit_n"], P["atr_n"], P["sl_atr"], P["sma_n"]
+    N = len(c); warm = max(en, an, sma_n) + 2; trades = []; pos = None; slip = slip_pips * ps
+    for i in range(warm, N - 1):
+        dhi = h[i - en:i].max(); dlo = l[i - en:i].min(); sma = c[i - sma_n:i].mean()
+        s = 0.0
+        for j in range(i - an, i):
+            s += max(h[j] - l[j], abs(h[j] - c[j - 1]), abs(l[j] - c[j - 1]))
+        atr = s / an
+        if atr <= 0:
+            continue
+        if pos is None:
+            up = c[i - 1] > sma; dn = c[i - 1] < sma   # ★手前の確定足のみ = 先読みなし
+            side = 0; e = None
+            if direction in ("long", "both") and up:
+                if o[i] >= dhi: e = o[i]; side = 1            # 始値で既にレベル超(ギャップ)
+                elif h[i] >= dhi: e = dhi + slip; side = 1    # intrabar到達(ダマシも拾う)
+            if side == 0 and direction in ("short", "both") and dn:
+                if o[i] <= dlo: e = o[i]; side = -1
+                elif l[i] <= dlo: e = dlo - slip; side = -1
+            if side != 0:
+                sl = e - sl_atr * atr if side == 1 else e + sl_atr * atr
+                pos = dict(side=side, e=e, sl=sl, sld=abs(e - sl), i=i)
+            continue
+        side = pos["side"]; xp = None; nxt = o[i + 1]
+        if side == 1:
+            trail = l[i - ex:i].min()
+            if l[i] <= pos["sl"]: xp = pos["sl"]
+            elif l[i] <= trail: xp = min(trail, nxt) - slip
+        else:
+            trail = h[i - ex:i].max()
+            if h[i] >= pos["sl"]: xp = pos["sl"]
+            elif h[i] >= trail: xp = max(trail, nxt) + slip
+        if xp is not None:
+            pnl = (xp - pos["e"]) if side == 1 else (pos["e"] - xp)
+            trades.append(dict(t=t[pos["i"]], R=pnl / pos["sld"], sld=pos["sld"])); pos = None
+    return trades
+
+
 def net_stream(pair, direction, mode="market", slip=0.0):
     t, o, h, l, c = cached_arrays(pair, "h1")
     ps = bpip(pair); cost = bcomm(pair) + SPREAD
-    tr = ea_trades(t, o, h, l, c, direction) if mode == "market" else stop_trades(t, o, h, l, c, direction, slip, ps)
+    if mode == "market":
+        tr = ea_trades(t, o, h, l, c, direction)
+    elif mode == "stop_lookahead":
+        tr = stop_trades(t, o, h, l, c, direction, slip, ps)       # 当足終値で確認=軽い先読み(研究相当)
+    else:  # honest_stop
+        tr = honest_stop_trades(t, o, h, l, c, direction, slip, ps)
     return [(x["t"], x["R"] - cost / max(x["sld"] / ps, 1e-9)) for x in tr]
 
 
@@ -199,16 +245,21 @@ def main():
         return float(np.sum(r)), len(r)
 
     print("  約定モデル別 sumR (long / short, net, 7ペア11年):")
-    print(f"  {'モデル':<26} | {'LONG sumR':>10} | {'SHORT sumR':>10}")
-    for label, mode, slip in [("逆指値 slip=0p(理想/研究相当)", "stop", 0.0),
-                              ("逆指値 slip=1p(現実的)", "stop", 1.0),
-                              ("逆指値 slip=2p(金/JPY相当)", "stop", 2.0),
-                              ("成行・次足始値(現EAの実挙動)", "market", 0.0)]:
+    print(f"  {'モデル':<34} | {'LONG sumR':>10} | {'SHORT sumR':>10}")
+    for label, mode, slip in [
+        ("[幻]逆指値+終値確認 slip0(研究/先読み)", "stop_lookahead", 0.0),
+        ("[現EA]成行・次足・終値確認", "market", 0.0),
+        ("[正直]逆指値・終値確認なし slip0", "honest_stop", 0.0),
+        ("[正直]逆指値・終値確認なし slip1p", "honest_stop", 1.0),
+        ("[正直]逆指値・終値確認なし slip2p", "honest_stop", 2.0)]:
         lr, _ = sumR("long", mode, slip); sr, _ = sumR("short", mode, slip)
-        print(f"  {label:<26} | {lr:>+9.1f}R | {sr:>+9.1f}R")
+        print(f"  {label:<34} | {lr:>+9.1f}R | {sr:>+9.1f}R")
     print("-" * 96)
-    print("判定(2026-06-16): ショートは逆指値slip=0でも直近ISが赤字、現実的slip/成行で全体赤字 → NO-GO。")
-    print("研究 axiory_longshort の +3.72%/月 は『同足レベル約定』の楽観フィルが作った幻。long-onlyは全モデルで黒字。")
+    print("判定(2026-06-16):")
+    print(" ・ショート: 全モデルで赤字 → スリーブ NO-GO。+3.72%/月は『終値確認+レベル約定』の先読みが作った幻。")
+    print(" ・執行改善(逆指値化)も NO-GO: 逆指値はintrabar約定で終値確認を捨てる必要があり、ダマシ増加(+349R→+74R)")
+    print("   が好フィル(+133R)を上回る。**現EAの『H1終値で確認してから成行』こそがエッジの源泉**(ダマシ除去)。")
+    print(" ・結論: long-only・成行・終値確認の現EAが現実解の上限。価格内/執行の伸び代は尽きた。")
 
 
 if __name__ == "__main__":
