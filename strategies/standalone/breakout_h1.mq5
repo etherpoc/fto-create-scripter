@@ -312,17 +312,46 @@ void OpenPos(int side, double atr, double ovMult)
 
 void ClosePos(string reason)
 {
+   // 決済前に建玉情報を確保。再起動後は g_e* が 0 なので建玉から直接取る(=ログが再起動に依存しない)
+   double refEntry = g_eEntry, refSL = g_eSL; int s = g_eSide; long ticket = 0;
+   if(PositionSelect(_Symbol))
+   {
+      refEntry = PositionGetDouble(POSITION_PRICE_OPEN);
+      refSL    = PositionGetDouble(POSITION_SL);
+      s        = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY) ? 1 : -1;
+      ticket   = (long)PositionGetInteger(POSITION_TICKET);
+   }
    if(!g_trade.PositionClose(_Symbol))
    {
       PrintFormat("[bo_h1] CLOSE FAIL ret=%d", g_trade.ResultRetcode()); return;
    }
-   double px = g_trade.ResultPrice();
-   double pnl = (g_eSide == 1) ? (px - g_eEntry) : (g_eEntry - px);
-   PrintFormat("[bo_h1] EXIT(%s) %s px=%.5f pnl_price~=%.5f", reason, _Symbol, px, pnl);
+   // 約定価格・実現損益は deal history から取得。ResultPrice() は PositionClose 後 0 を返すことがある(MT5の癖)
+   double px = 0.0, profit = 0.0;
+   if(ticket > 0 && HistorySelect(TimeCurrent() - 86400, TimeCurrent() + 60))
+   {
+      for(int i = HistoryDealsTotal() - 1; i >= 0; i--)
+      {
+         ulong d = HistoryDealGetTicket(i);
+         if((long)HistoryDealGetInteger(d, DEAL_POSITION_ID) != ticket) continue;
+         if((ENUM_DEAL_ENTRY)HistoryDealGetInteger(d, DEAL_ENTRY) != DEAL_ENTRY_OUT) continue;
+         px = HistoryDealGetDouble(d, DEAL_PRICE);
+         profit += HistoryDealGetDouble(d, DEAL_PROFIT)
+                 + HistoryDealGetDouble(d, DEAL_SWAP)
+                 + HistoryDealGetDouble(d, DEAL_COMMISSION);
+         break;
+      }
+   }
+   if(px <= 0) px = g_trade.ResultPrice();   // 最終フォールバック
+   double pnlPrice = (s == 1) ? (px - refEntry) : (refEntry - px);
+   double slDist   = (refEntry > 0 && refSL > 0) ? MathAbs(refEntry - refSL) : 0.0;
+   double R        = (slDist > 0) ? pnlPrice / slDist : 0.0;
+   PrintFormat("[bo_h1] EXIT(%s) %s close=%.5f entry=%.5f pnl_price=%.5f R=%.2f 実現損益≈%.2f %s (bal=%.2f)",
+               reason, _Symbol, px, refEntry, pnlPrice, R, profit,
+               AccountInfoString(ACCOUNT_CURRENCY), AccountInfoDouble(ACCOUNT_BALANCE));
    if(g_csv != INVALID_HANDLE)
    {
       FileWrite(g_csv, "exit", TimeToString(iTime(_Symbol,TF,0), TIME_DATE|TIME_MINUTES),
-                (g_eSide==1?"long":"short"), px, g_eSL, g_eLot, 0.0, AccountInfoDouble(ACCOUNT_BALANCE), reason);
+                (s==1?"long":"short"), px, refSL, g_eLot, profit, AccountInfoDouble(ACCOUNT_BALANCE), reason);
       FileFlush(g_csv);
    }
    g_eValid = false;
